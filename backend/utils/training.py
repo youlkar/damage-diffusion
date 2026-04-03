@@ -8,6 +8,7 @@ from tqdm import tqdm
 import time
 from typing import Optional, Dict
 import json
+import numpy as np
 
 from .metrics import MetricsTracker, compute_fid_score
 from .visualization import visualize_samples, save_samples, plot_training_curves
@@ -134,7 +135,6 @@ class Trainer:
 
             # Calculate loss
             loss = F.mse_loss(noise_pred, noise)
-
             total_loss += loss.item()
             num_batches += 1
 
@@ -196,7 +196,6 @@ class Trainer:
     def load_checkpoint(self, checkpoint_path: str):
         # load model checkpoint
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
-
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
@@ -241,7 +240,6 @@ class Trainer:
                 val_loss=val_loss,
                 learning_rate=self.optimizer.param_groups[0]['lr']
             )
-
             self.writer.add_scalar('epoch/train_loss', train_loss, epoch)
             self.writer.add_scalar('epoch/val_loss', val_loss, epoch)
 
@@ -284,6 +282,17 @@ class Trainer:
                 except Exception as e:
                     print(f"Failed to compute FID: {e}")
 
+                # Compute IoU and pixel accuracy
+                print("Computing IoU and pixel accuracy...")
+                try:
+                    iou_score, acc_score = self.compute_iou_metrics()
+                    self.metrics_tracker.update(iou=iou_score, pixel_accuracy=acc_score)
+                    self.writer.add_scalar('metrics/iou', iou_score, epoch)
+                    self.writer.add_scalar('metrics/pixel_accuracy', acc_score, epoch)
+                    print(f"IoU: {iou_score:.4f} | Pixel Accuracy: {acc_score:.4f}")
+                except Exception as e:
+                    print(f"Failed to compute IoU metrics: {e}")
+
         # Save final checkpoint
         self.save_checkpoint('final_model.pt', is_best=False)
 
@@ -317,7 +326,6 @@ class Trainer:
         for images, masks in self.val_loader:
             real_images.append(images)
             masks_for_generation.append(masks)
-
             if len(real_images) * images.shape[0] >= self.config.num_fid_samples:
                 break
 
@@ -346,5 +354,34 @@ class Trainer:
 
         # Compute FID
         fid = compute_fid_score(real_images, generated_images, device=self.device)
-
         return fid
+#Compute IoU and pixel accuracy on generated vs real masks
+    @torch.no_grad()
+    def compute_iou_metrics(self) -> tuple:
+        from .metrics import compute_iou, compute_pixel_accuracy
+        self.model.eval()
+
+        all_iou = []
+        all_acc = []
+
+        if self.ema is not None:
+            self.ema.apply_shadow(self.model)
+
+        for images, masks in tqdm(self.val_loader, desc="Computing IoU"):
+            masks = masks.to(self.device)
+            generated = self.model.generate(
+                masks,
+                num_inference_steps=self.config.num_inference_steps
+            )
+            gen_mask = (generated.mean(dim=1, keepdim=True) > 0).float()
+            iou = compute_iou(gen_mask, masks)
+            acc = compute_pixel_accuracy(gen_mask, masks)
+            all_iou.append(iou)
+            all_acc.append(acc)
+            if len(all_iou) * masks.shape[0] >= self.config.num_fid_samples:
+                break
+
+        if self.ema is not None:
+            self.ema.restore(self.model)
+
+        return float(np.mean(all_iou)), float(np.mean(all_acc))
