@@ -1,0 +1,52 @@
+# Dataset images
+/data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+ENV/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints
+
+# Training outputs
+backend/checkpoints/
+backend/logs/
+backend/samples/
+backend/outputs/
+backend/generated/
+
+# TensorBoard
+events.out.tfevents.*
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Large files
+*.zip
+*.tar.gz
+*.rar
