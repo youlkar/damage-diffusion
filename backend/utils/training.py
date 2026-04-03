@@ -3,7 +3,8 @@
 import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
-from torch.cuda.amp import GradScaler, autocast
+from torch.cuda.amp import GradScaler
+from torch.amp import autocast
 from pathlib import Path
 from tqdm import tqdm
 import time
@@ -91,7 +92,7 @@ class Trainer:
 
             # Forward pass with mixed precision
             if self.use_amp:
-                with autocast(dtype=self.amp_dtype):
+                with autocast(device_type='cuda', dtype=self.amp_dtype):
                     loss = self._compute_loss(images, masks, is_latent_diffusion)
                 
                 # Backward pass with AMP
@@ -210,7 +211,7 @@ class Trainer:
 
             # Use mixed precision for validation too
             if self.use_amp:
-                with autocast(dtype=self.amp_dtype):
+                with autocast(device_type='cuda', dtype=self.amp_dtype):
                     loss = self._compute_loss(images, masks, is_latent_diffusion)
             else:
                 loss = self._compute_loss(images, masks, is_latent_diffusion)
