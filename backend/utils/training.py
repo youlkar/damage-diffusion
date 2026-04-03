@@ -241,8 +241,21 @@ class Trainer:
 
         # Generate images
         if is_latent_diffusion:
-            # LATENT DIFFUSION: Encode masks and sample
-            mask_latents = self.model.encode_masks(masks)
+            # LATENT DIFFUSION: Check if data is already latent or pixel-space
+            if masks.shape[1] == 4:
+                # Data is already pre-encoded latents
+                mask_latents = masks
+                image_latents = images
+                # Decode to pixel space for visualization
+                images = self.model.decode_latents(image_latents)
+                masks_decoded = self.model.decode_latents(mask_latents)
+                # Convert RGB decoded mask to single-channel binary (average channels and threshold)
+                masks = masks_decoded.mean(dim=1, keepdim=True)
+                masks = (masks > 0).float()
+            else:
+                # Data is pixel-space, need to encode
+                mask_latents = self.model.encode_masks(masks)
+
             num_steps = getattr(self.config, 'num_inference_steps', 50)
             generated = self.model.sample(mask_latents, num_inference_steps=num_steps)
         else:
