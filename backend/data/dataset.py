@@ -12,7 +12,6 @@ from torch.utils.data import DataLoader
 
 
 class CrackSegmentationDataset(Dataset):
-
     def __init__(
         self,
         root_dir: str,
@@ -22,8 +21,6 @@ class CrackSegmentationDataset(Dataset):
         mask_transform: Optional[transforms.Compose] = None,
         horizontal_flip: bool = True,
     ):
-        assert split in ['train', 'val', 'test'], f"Split must be 'train', 'val', or 'test', got {split}"
-
         self.root_dir = Path(root_dir)
         self.split = split
         self.image_size = image_size
@@ -45,11 +42,12 @@ class CrackSegmentationDataset(Dataset):
 
         print(f"Loaded {len(self.valid_pairs)} {split} samples from {self.image_dir}")
 
+        # resize and normalize images and masks
         if transform is None:
             self.transform = transforms.Compose([
                 transforms.Resize((image_size, image_size), interpolation=transforms.InterpolationMode.BILINEAR),
-                transforms.ToTensor(),  # Converts to [0, 1]
-                transforms.Normalize([0.5], [0.5])  # Normalize to [-1, 1]
+                transforms.ToTensor(),
+                transforms.Normalize([0.5], [0.5])
             ])
         else:
             self.transform = transform
@@ -57,13 +55,13 @@ class CrackSegmentationDataset(Dataset):
         if mask_transform is None:
             self.mask_transform = transforms.Compose([
                 transforms.Resize((image_size, image_size), interpolation=transforms.InterpolationMode.NEAREST),
-                transforms.ToTensor(),  # Converts to [0, 1]
+                transforms.ToTensor(),
             ])
         else:
             self.mask_transform = mask_transform
 
-    def _validate_pairs(self) -> List[str]:
-        """Validate that each image has a corresponding mask."""
+    def validate_pairs(self):
+        # validate each image has a corresponding mask
         valid_pairs = []
         for img_file in self.image_files:
             mask_file = img_file  # Masks have the same filename as images
@@ -73,10 +71,10 @@ class CrackSegmentationDataset(Dataset):
                 print(f"Warning: No mask found for {img_file}")
         return valid_pairs
 
-    def __len__(self) -> int:
+    def __len__(self):
         return len(self.valid_pairs)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx):
         img_name = self.valid_pairs[idx]
 
         # Load image and mask
@@ -97,14 +95,7 @@ class CrackSegmentationDataset(Dataset):
 
         return image, mask
 
-    @staticmethod
-    def create_train_val_split(
-        root_dir: str,
-        train_ratio: float = 0.9,
-        image_size: int = 128,
-        random_seed: int = 42,
-        horizontal_flip: bool = True,
-    ) -> Tuple[Dataset, Dataset]:
+    def create_train_val_split(root_dir, train_ratio = 0.9, image_size = 128, random_seed = 42, horizontal_flip = True):
   
         full_dataset = CrackSegmentationDataset(
             root_dir=root_dir,
@@ -140,8 +131,8 @@ class CrackSegmentationDataset(Dataset):
 
         return train_dataset, val_dataset
 
-    def get_sample_batch(self, num_samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Get a batch of samples for visualization."""
+    def get_sample_batch(self, num_samples = 4):
+        # get a batch of samples for visualization
         indices = np.random.choice(len(self), min(num_samples, len(self)), replace=False)
         images, masks = [], []
         for idx in indices:
@@ -153,7 +144,7 @@ class CrackSegmentationDataset(Dataset):
 
 def get_dataloaders(config):
 
-    # Create datasets
+    # datasets
     train_dataset, val_dataset = CrackSegmentationDataset.create_train_val_split(
         root_dir=config.data_root,
         train_ratio=config.train_val_split,
@@ -162,7 +153,7 @@ def get_dataloaders(config):
         horizontal_flip=config.horizontal_flip,
     )
 
-    # Apply subset if configured (for fast training)
+    # apply subset
     if hasattr(config, 'subset_ratio') and config.subset_ratio < 1.0:
 
         original_size = len(train_dataset)
@@ -182,13 +173,16 @@ def get_dataloaders(config):
         horizontal_flip=False,
     )
 
-    # Create dataloaders
+    # dataloaders with optimizations
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.train_batch_size,
         shuffle=True,
         num_workers=config.num_workers,
         pin_memory=config.pin_memory,
+        persistent_workers=True if config.num_workers > 0 else False,
+        prefetch_factor=2 if config.num_workers > 0 else None,
+        drop_last=True,
     )
 
     val_loader = DataLoader(

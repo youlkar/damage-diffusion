@@ -3,6 +3,8 @@
 import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
+from torch.amp import autocast
+from torch.cuda.amp import GradScaler
 from pathlib import Path
 from tqdm import tqdm
 import time
@@ -62,8 +64,14 @@ class Trainer:
             eta_min=config.learning_rate * 0.01
         )
 
+        # Mixed precision training
+        self.use_amp = config.mixed_precision in ('fp16', 'bf16') and 'cuda' in device
+        self.scaler = GradScaler() if self.use_amp and config.mixed_precision == 'fp16' else None
+        self.amp_dtype = torch.float16 if config.mixed_precision == 'fp16' else torch.bfloat16
+
         print(f"Trainer initialized on device: {device}")
         print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+        print(f"Mixed precision: {config.mixed_precision} (AMP: {self.use_amp})")
 
     def train_epoch(self) -> float:
         # train for one epoch
@@ -74,28 +82,47 @@ class Trainer:
         progress_bar = tqdm(self.train_loader, desc=f"Epoch {self.current_epoch}")
 
         for batch_idx, (images, masks) in enumerate(progress_bar):
-            # Move to device
-            images = images.to(self.device)
-            masks = masks.to(self.device)
+            # Move to device with channels-last format for GPU efficiency
+            images = images.to(self.device, non_blocking=True, memory_format=torch.channels_last)
+            masks = masks.to(self.device, non_blocking=True)
 
-            # Forward pass
-            noise_pred, noise, noisy_images = self.model(images, masks)
+            # Forward pass with mixed precision
+            if self.use_amp:
+                with autocast(device_type='cuda', dtype=self.amp_dtype):
+                    noise_pred, noise, noisy_images = self.model(images, masks)
+                    loss = F.mse_loss(noise_pred, noise)
 
-            # Calculate loss (MSE between predicted and actual noise)
-            loss = F.mse_loss(noise_pred, noise)
+                # Backward pass with AMP
+                self.optimizer.zero_grad()
+                self.scaler.scale(loss).backward()
 
-            # Backward pass
-            self.optimizer.zero_grad()
-            loss.backward()
+                # Gradient clipping
+                if self.config.max_grad_norm > 0:
+                    self.scaler.unscale_(self.optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config.max_grad_norm
+                    )
 
-            # Gradient clipping
-            if self.config.max_grad_norm > 0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.config.max_grad_norm
-                )
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                # Standard precision
+                noise_pred, noise, noisy_images = self.model(images, masks)
+                loss = F.mse_loss(noise_pred, noise)
 
-            self.optimizer.step()
+                # Backward pass
+                self.optimizer.zero_grad()
+                loss.backward()
+
+                # Gradient clipping
+                if self.config.max_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config.max_grad_norm
+                    )
+
+                self.optimizer.step()
 
             # Update EMA
             if self.ema is not None:
@@ -126,14 +153,17 @@ class Trainer:
         num_batches = 0
 
         for images, masks in tqdm(self.val_loader, desc="Validation"):
-            images = images.to(self.device)
-            masks = masks.to(self.device)
+            images = images.to(self.device, non_blocking=True, memory_format=torch.channels_last)
+            masks = masks.to(self.device, non_blocking=True)
 
-            # Forward pass
-            noise_pred, noise, noisy_images = self.model(images, masks)
-
-            # Calculate loss
-            loss = F.mse_loss(noise_pred, noise)
+            # Forward pass with mixed precision
+            if self.use_amp:
+                with autocast(device_type='cuda', dtype=self.amp_dtype):
+                    noise_pred, noise, noisy_images = self.model(images, masks)
+                    loss = F.mse_loss(noise_pred, noise)
+            else:
+                noise_pred, noise, noisy_images = self.model(images, masks)
+                loss = F.mse_loss(noise_pred, noise)
 
             total_loss += loss.item()
             num_batches += 1
