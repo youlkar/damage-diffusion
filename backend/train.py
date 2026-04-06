@@ -4,27 +4,20 @@ import torch
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
-from configs.config import Config, FastConfig
-from core.hardware import detect_hardware, setup_cuda_optimizations
-from core.model_factory import create_model, create_optimizer
-from core.trainer import Trainer
+from configs.train_config import TrainingConfig, FastTrainingConfig
 from data.dataset import get_dataloaders
+from models.diffusion import MaskConditionedDDPM
+from utils.training import Trainer
 import traceback
 from utils.visualization import visualize_samples
 
 
-# function to parse command line arguments passed to training script
 def parse_args():
     parser = argparse.ArgumentParser(description='Train Mask-Conditioned DDPM')
 
     # config preset
-    parser.add_argument(
-        '--config',
-        type=str,
-        default='default',
-        choices=['default', 'fast'],
-        help='Configuration preset: default (full quality), fast (2-4h training)'
-    )
+    parser.add_argument('--config', type=str, default='default', choices=['default', 'fast'],
+                       help='Configuration preset: default (full quality), fast (2-4h training)')
 
     # data args
     parser.add_argument('--data_root', type=str, help='Path to dataset root directory')
@@ -72,21 +65,85 @@ def apply_cli_overrides(config, args):
     return config
 
 
+def detect_hardware(config):
+    """Auto-detect hardware and configure settings."""
+    if torch.cuda.is_available():
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+        gpu_name = torch.cuda.get_device_name(0)
+
+        # VRAM-based batch sizing
+        config.train_batch_size = max(4, min(48, int(vram_gb * 1.5)))
+        config.eval_batch_size = config.train_batch_size * 2
+        config.device = "cuda"
+
+        print(f"CUDA GPU Detected: {gpu_name} ({vram_gb:.1f}GB VRAM)")
+        print(f"Config applied: batch_size={config.train_batch_size}, eval_batch_size={config.eval_batch_size}")
+
+    elif torch.backends.mps.is_available():
+        config.train_batch_size = 4
+        config.eval_batch_size = 8
+        config.device = "mps"
+        config.mixed_precision = "no"
+        config.num_workers = 2
+
+        print("Apple Silicon Detected (MPS)")
+        print(f"Config applied: batch_size={config.train_batch_size}, mixed_precision=no")
+
+    else:
+        config.train_batch_size = 2
+        config.eval_batch_size = 4
+        config.device = "cpu"
+        config.mixed_precision = "no"
+        config.num_workers = 2
+
+        print("CPU Detected")
+        print(f"Config applied: batch_size={config.train_batch_size}, mixed_precision=no")
+
+    return config
+
+
+def create_model(config):
+    """Create and optimize model."""
+    print("Initializing model...")
+    model = MaskConditionedDDPM(config)
+
+    # channels-last for GPU
+    if config.device == "cuda":
+        model = model.to(memory_format=torch.channels_last)
+        print("Model converted to channels-last format")
+
+    # torch.compile optimization
+    if hasattr(torch, 'compile'):
+        try:
+            print("Compiling model with torch.compile...")
+            model = torch.compile(model, mode='reduce-overhead')
+            print("Model compiled successfully")
+        except Exception as e:
+            print(f"torch.compile failed (continuing without): {e}")
+
+    # print model info
+    num_params = sum(p.numel() for p in model.parameters())
+    print(f"Model parameters: {num_params:,}")
+
+    return model
+
+
 def main():
     args = parse_args()
 
+    # create config
     if args.config == 'fast':
-        config = FastConfig()
+        config = FastTrainingConfig()
         print("\n" + "-"*50)
-        print("Fast training config approx 2-4 hrs training")
+        print("Fast training config approx 2-4 hrs")
         print("-"*50)
         print("20% data subset")
         print("30 epochs")
-        print("Smaller model")
+        print("Smaller model (12M params)")
         print("100 timesteps")
         print("-"*50 + "\n")
     else:
-        config = Config()
+        config = TrainingConfig()
         print("\n" + "-"*50)
         print("Full regular training config")
         print("-"*50)
@@ -94,23 +151,26 @@ def main():
         print("Batch sizing based on vram")
         print("-"*50 + "\n")
 
-    
+    # apply CLI overrides
     config = apply_cli_overrides(config, args)
+
+    # auto-detect hardware
     config = detect_hardware(config)
 
     # random seeds
     torch.manual_seed(config.random_seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(config.random_seed)
-        setup_cuda_optimizations()
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.enabled = True
 
     # config summary
     print("\nDamageDiffusion Training Configuration:")
     print("-"*50)
-    print(f"Device configured to: {config.device}")
+    print(f"Device: {config.device}")
     print(f"Image size: {config.image_size}")
     print(f"Batch size: {config.train_batch_size}")
-    print(f"Epochs being trained: {config.num_epochs}")
+    print(f"Epochs: {config.num_epochs}")
     print(f"Learning rate: {config.learning_rate}")
     print(f"Mixed precision: {config.mixed_precision}")
     print(f"Data root: {config.data_root}")
@@ -121,14 +181,22 @@ def main():
     print("Loading datasets")
     train_loader, val_loader, test_loader = get_dataloaders(config)
 
-    # training and validation batches
     print(f"Train batches: {len(train_loader)}")
     print(f"Validation batches: {len(val_loader)}")
     print(f"Test batches: {len(test_loader)}\n")
 
-    # model optimizer and trainer
+    # create model and optimizer
     model = create_model(config)
-    optimizer = create_optimizer(model, config)
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config.learning_rate,
+        betas=(config.adam_beta1, config.adam_beta2),
+        weight_decay=config.adam_weight_decay,
+        eps=config.adam_epsilon,
+    )
+
+    # create trainer
     trainer = Trainer(
         model=model,
         train_loader=train_loader,
@@ -145,20 +213,17 @@ def main():
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
         trainer.save_checkpoint('interrupted_checkpoint.pt')
-
         print("Saved checkpoint before exiting")
     except Exception as e:
         print(f"\n\nError during training: {e}")
         traceback.print_exc()
         trainer.save_checkpoint('error_checkpoint.pt')
-
         print("Saved checkpoint before exiting")
-
         raise
 
     print("\nTraining completed successfully!")
 
-    # evaluate on test set and generate samples
+    # evaluate on test set
     print("\nEvaluating on test set")
     test_loss = trainer.validate()
     print(f"Test Loss: {test_loss:.4f}")
@@ -167,14 +232,14 @@ def main():
     print("\nGenerating final samples")
     images, masks, generated = trainer.generate_samples(num_samples=16)
 
-    visualize_samples(images, masks, generated, num_samples=8,save_path=f"{config.sample_dir}/final_samples.png")
-    
+    visualize_samples(images, masks, generated, num_samples=8, save_path=f"{config.sample_dir}/final_samples.png")
+
     print(f"\nFile save directories:")
     print(f"Checkpoints: {config.checkpoint_dir}")
     print(f"Logs: {config.log_dir}")
     print(f"Samples: {config.sample_dir}")
     print(f"\nTo view training progress with TensorBoard:")
-    print(f"Command to view training progress with tensorboard: tensorboard --logdir={config.log_dir}")
+    print(f"tensorboard --logdir={config.log_dir}")
 
 
 if __name__ == '__main__':
