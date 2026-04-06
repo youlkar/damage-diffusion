@@ -104,9 +104,13 @@ class FastConfig(Config):
     - Fewer timesteps (100 vs 1000)
     """
 
-    # Override parent values
-    subset_ratio = 0.2
-    num_epochs = 30
-    block_out_channels = (64, 128, 256, 256)  # 12M params
-    num_train_timesteps = 100
-    save_checkpoint_epochs = 10
+    def __init__(self):
+        # Call parent init first to create directories
+        super().__init__()
+
+        # Override values for fast training
+        self.subset_ratio = 0.2
+        self.num_epochs = 30
+        self.block_out_channels = (64, 128, 256, 256)  # 12M params
+        self.num_train_timesteps = 100
+        self.save_checkpoint_epochs = 10
