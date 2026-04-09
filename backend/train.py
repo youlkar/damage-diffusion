@@ -112,14 +112,16 @@ def create_model(config):
         model = model.to(memory_format=torch.channels_last)
         print("Model converted to channels-last format")
 
-    # torch.compile optimization
-    if hasattr(torch, 'compile'):
+    # torch.compile optimization (skip if disabled to save memory)
+    if hasattr(config, 'use_compile') and config.use_compile and hasattr(torch, 'compile'):
         try:
             print("Compiling model with torch.compile...")
             model = torch.compile(model, mode='reduce-overhead')
             print("Model compiled successfully")
         except Exception as e:
             print(f"torch.compile failed (continuing without): {e}")
+    elif hasattr(config, 'use_compile') and not config.use_compile:
+        print("torch.compile disabled (saves memory)")
 
     # print model info
     num_params = sum(p.numel() for p in model.parameters())

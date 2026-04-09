@@ -78,6 +78,7 @@ class TrainingConfig:
     num_workers = 4
     pin_memory = True
     device = "cuda"
+    use_compile = True  # enable torch.compile by default
 
     def __init__(self):
         # create output directories
@@ -99,3 +100,10 @@ class FastTrainingConfig(TrainingConfig):
         self.block_out_channels = (64, 128, 256, 256)
         self.num_train_timesteps = 100
         self.save_checkpoint_epochs = 10
+
+        # reduce memory usage during sample generation
+        self.num_samples_to_generate = 4 
+        self.num_inference_steps = 25 
+
+        # disable torch.compile to save memory (CUDA graphs use too much)
+        self.use_compile = False

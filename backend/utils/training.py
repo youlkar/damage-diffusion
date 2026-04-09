@@ -176,6 +176,10 @@ class Trainer:
         # generate samples for visualization
         self.model.eval()
 
+        # clear cuda cache before generating samples
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         # Get random masks from validation set
         images, masks = next(iter(self.val_loader))
         masks = masks[:num_samples].to(self.device)
