@@ -38,7 +38,7 @@ class CrackSegmentationDataset(Dataset):
         self.image_files = sorted([f for f in os.listdir(self.image_dir)
                                    if f.endswith(('.jpg', '.png', '.jpeg'))])
 
-        self.valid_pairs = self._validate_pairs()
+        self.valid_pairs = self.validate_pairs()
 
         print(f"Loaded {len(self.valid_pairs)} {split} samples from {self.image_dir}")
 
