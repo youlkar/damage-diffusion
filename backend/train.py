@@ -4,7 +4,7 @@ import torch
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
-from configs.train_config import TrainingConfig, FastTrainingConfig
+from configs.train_config import TrainingConfig, MediumTrainingConfig, FastTrainingConfig
 from data.dataset import get_dataloaders
 from models.diffusion import MaskConditionedDDPM
 from utils.training import Trainer
@@ -16,8 +16,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train Mask-Conditioned DDPM')
 
     # config preset
-    parser.add_argument('--config', type=str, default='default', choices=['default', 'fast'],
-                       help='Configuration preset: default (full quality), fast (2-4h training)')
+    parser.add_argument('--config', type=str, default='default', choices=['default', 'medium', 'fast'],
+                       help='Configuration preset: default (full quality), medium (4-6h validation), fast (2-4h training)')
 
     # data args
     parser.add_argument('--data_root', type=str, help='Path to dataset root directory')
@@ -143,6 +143,22 @@ def main():
         print("30 epochs")
         print("Smaller model (12M params)")
         print("100 timesteps")
+        print("-"*50)
+        print(f"DEBUG: After FastConfig creation:")
+        print(f"num_epochs = {config.num_epochs}")
+        print(f"block_out_channels = {config.block_out_channels}")
+        print(f"num_train_timesteps = {config.num_train_timesteps}")
+        print("-"*50 + "\n")
+    elif args.config == 'medium':
+        config = MediumTrainingConfig()
+        print("\n" + "-"*50)
+        print("Medium training config approx 4-6 hrs")
+        print("-"*50)
+        print("50% data subset")
+        print("50 epochs")
+        print("Medium model (~45M params)")
+        print("500 timesteps")
+        print("VALIDATION MODE: Test if crack generation works")
         print("-"*50 + "\n")
     else:
         config = TrainingConfig()

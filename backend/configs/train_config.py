@@ -88,6 +88,28 @@ class TrainingConfig:
         Path(self.sample_dir).mkdir(parents=True, exist_ok=True)
 
 
+class MediumTrainingConfig(TrainingConfig):
+    # medium training configuration (4-6 hours) - validation test
+    # Use this to verify crack generation works before committing to full 18hr training
+
+    def __init__(self):
+        super().__init__()
+
+        # balanced settings for validation
+        self.subset_ratio = 0.5
+        self.num_epochs = 50
+        self.block_out_channels = (96, 192, 384, 384)
+        self.num_train_timesteps = 500
+        self.save_checkpoint_epochs = 5
+
+        # moderate sample generation
+        self.num_samples_to_generate = 6
+        self.num_inference_steps = 50
+
+        # disable torch.compile to save memory
+        self.use_compile = False
+
+
 class FastTrainingConfig(TrainingConfig):
     # fast training configuration (2-4 hours)
 
@@ -102,8 +124,8 @@ class FastTrainingConfig(TrainingConfig):
         self.save_checkpoint_epochs = 10
 
         # reduce memory usage during sample generation
-        self.num_samples_to_generate = 4 
-        self.num_inference_steps = 25 
+        self.num_samples_to_generate = 4
+        self.num_inference_steps = 25
 
         # disable torch.compile to save memory (CUDA graphs use too much)
         self.use_compile = False
