@@ -116,16 +116,16 @@ class FastTrainingConfig(TrainingConfig):
     def __init__(self):
         super().__init__()
 
-        # override for fast training
-        self.subset_ratio = 0.2
-        self.num_epochs = 30
-        self.block_out_channels = (64, 128, 256, 256)
-        self.num_train_timesteps = 100
+        # IMPROVED fast training - still fast but actually learns cracks
+        self.subset_ratio = 0.5  # Use 50% of data instead of 20%
+        self.num_epochs = 50     # Increase to 50 epochs instead of 30
+        self.block_out_channels = (96, 192, 384, 384)  # Larger model
+        self.num_train_timesteps = 500  # CRITICAL: Use 500 timesteps instead of 100
         self.save_checkpoint_epochs = 10
 
         # reduce memory usage during sample generation
         self.num_samples_to_generate = 4
-        self.num_inference_steps = 25
+        self.num_inference_steps = 50  # Increase inference steps
 
         # disable torch.compile to save memory (CUDA graphs use too much)
         self.use_compile = False
