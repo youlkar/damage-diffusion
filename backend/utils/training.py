@@ -306,6 +306,16 @@ class Trainer:
 
                 # Log to TensorBoard
                 self.writer.add_figure('samples/generated', fig, epoch)
+                
+                # check for signs of crack earlier
+                if epoch >= 15 and epoch <= 25:
+                    print(f"\n{'-'*50}")
+                    print(f"Crack detection checkpoint - Epoch {epoch}")
+                    print(f"{'-'*50}")
+                    print(f"Check samples_epoch_{epoch}.png for crack patterns")
+                    print(f"If NO cracks visible by epoch 25, consider stopping training.")
+                    print(f"Model should show faint crack patterns by now.")
+                    print(f"{'-'*50}\n")
 
             # Compute FID if enabled
             if self.config.compute_fid and (epoch + 1) % self.config.fid_every_epochs == 0:
@@ -320,6 +330,15 @@ class Trainer:
 
         # Save final checkpoint
         self.save_checkpoint('final_model.pt', is_best=False)
+        
+        # Run mask sensitivity diagnostic
+        print("\nRUNNING FINAL DIAGNOSTIC: Mask Sensitivity Test")
+        print("-"*50)
+        try:
+            self.run_mask_diagnostic()
+        except Exception as e:
+            print(f"Diagnostic failed: {e}")
+        print("-"*50)
 
         # Save metrics
         self.metrics_tracker.save()
@@ -382,3 +401,44 @@ class Trainer:
         fid = compute_fid_score(real_images, generated_images, device=self.device)
 
         return fid
+    
+    @torch.no_grad()
+    def run_mask_diagnostic(self):
+        """Test if model uses mask conditioning properly."""
+        self.model.eval()
+        
+        # Create test inputs - same image, different masks
+        batch_size = 2
+        noisy_image = torch.randn(batch_size, 3, self.config.image_size, self.config.image_size, device=self.device)
+        
+        # Two very different masks
+        mask1 = torch.zeros(1, 1, self.config.image_size, self.config.image_size, device=self.device)
+        mask1[0, 0, self.config.image_size//2, :] = 1.0  # Horizontal crack
+        
+        mask2 = torch.zeros(1, 1, self.config.image_size, self.config.image_size, device=self.device)
+        mask2[0, 0, :, self.config.image_size//2] = 1.0  # Vertical crack
+        
+        masks = torch.cat([mask1, mask2], dim=0)
+        timestep = torch.tensor([500, 500], device=self.device)
+        
+        # Get model predictions
+        model_input = torch.cat([noisy_image, masks], dim=1)
+        output = self.model.model(model_input, timestep).sample
+        
+        # Calculate difference
+        diff = (output[0] - output[1]).abs().mean()
+        output_scale = output.abs().mean()
+        relative_diff = (diff / output_scale * 100)
+        
+        print(f"Mask sensitivity test:")
+        print(f"Relative difference: {relative_diff:.2f}%")
+        
+        if relative_diff < 1.0:
+            print("RESULT: MODEL IGNORES MASKS")
+            print("Action: Training failed - model needs debugging")
+        elif relative_diff < 10.0:
+            print("RESULT: WEAK mask conditioning")
+            print("Action: May need longer training or architecture changes")
+        else:
+            print("RESULT: GOOD mask conditioning")
+            print("Action: Model successfully learned mask-conditioned generation")

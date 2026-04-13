@@ -17,12 +17,20 @@ sys.path.append(str(Path(__file__).parent))
 def load_model(checkpoint_path: str, device: str = 'cuda'):
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
-    # Recreate config
+    # Recreate the EXACT config used during training
     config = TrainingConfig()
     if 'config' in checkpoint:
+        # Apply all saved config values
         for key, value in checkpoint['config'].items():
             if hasattr(config, key):
                 setattr(config, key, value)
+        
+        print(f"Loaded training config:")
+        print(f"Model channels: {config.block_out_channels}")
+        print(f"Timesteps: {config.num_train_timesteps}")
+        print(f"Image size: {config.image_size}")
+    else:
+        print("WARNING: No config found in checkpoint, using defaults")
 
     # Create model
     model = MaskConditionedDDPM(config)

@@ -106,6 +106,11 @@ class MediumTrainingConfig(TrainingConfig):
         self.num_samples_to_generate = 6
         self.num_inference_steps = 50
 
+        # FID optimization for medium config
+        self.num_fid_samples = 500  # Use 500 instead of 1000
+        self.fid_every_epochs = 25  # Compute less frequently
+        self.compute_fid = False  # Disable for speed, enable manually if needed
+
         # disable torch.compile to save memory
         self.use_compile = False
 
@@ -126,6 +131,10 @@ class FastTrainingConfig(TrainingConfig):
         # reduce memory usage during sample generation
         self.num_samples_to_generate = 4
         self.num_inference_steps = 50  # Increase inference steps
+
+        # disable torch.compile to save memory (CUDA graphs use too much)
+        self.use_compile = False
+        self.compute_fid = False  # Disable FID entirely for fast training
 
         # disable torch.compile to save memory (CUDA graphs use too much)
         self.use_compile = False
