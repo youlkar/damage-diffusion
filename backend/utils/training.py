@@ -185,19 +185,16 @@ class Trainer:
         masks = masks[:num_samples].to(self.device)
         images = images[:num_samples].to(self.device)
 
-        # Apply EMA if enabled
-        if self.ema is not None:
-            self.ema.apply_shadow(self.model)
+        # CRITICAL FIX: Use trained weights instead of EMA for sample generation
+        # EMA weights need ~10,000 steps to converge with decay=0.9999
+        # At early epochs (< 50), EMA is still mostly random initialization
+        # Using trained weights gives accurate training progress monitoring
 
-        # Generate images
+        # Generate images with trained weights (NOT EMA)
         generated = self.model.generate(
             masks,
             num_inference_steps=self.config.num_inference_steps
         )
-
-        # Restore original weights
-        if self.ema is not None:
-            self.ema.restore(self.model)
 
         return images, masks, generated
 
@@ -377,12 +374,9 @@ class Trainer:
         real_images = torch.cat(real_images, dim=0)[:self.config.num_fid_samples]
         masks_for_generation = torch.cat(masks_for_generation, dim=0)[:self.config.num_fid_samples]
 
-        # Generate fake images
+        # Generate fake images using trained weights (not EMA)
         generated_images = []
         batch_size = self.config.eval_batch_size
-
-        if self.ema is not None:
-            self.ema.apply_shadow(self.model)
 
         for i in range(0, len(masks_for_generation), batch_size):
             batch_masks = masks_for_generation[i:i+batch_size].to(self.device)
@@ -391,9 +385,6 @@ class Trainer:
                 num_inference_steps=self.config.num_inference_steps
             )
             generated_images.append(batch_generated.cpu())
-
-        if self.ema is not None:
-            self.ema.restore(self.model)
 
         generated_images = torch.cat(generated_images, dim=0)
 

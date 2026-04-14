@@ -62,7 +62,7 @@ class TrainingConfig:
     log_every_steps = 100
     eval_every_epochs = 5
     generate_samples_every_epochs = 5
-    num_inference_steps = 50
+    num_inference_steps = 50  # DDIM: 50 steps gives excellent quality (10x faster than DDPM 500)
     num_samples_to_generate = 8
 
     # evaluation metrics
@@ -130,7 +130,7 @@ class FastTrainingConfig(TrainingConfig):
 
         # reduce memory usage during sample generation
         self.num_samples_to_generate = 4
-        self.num_inference_steps = 50  # Increase inference steps
+        self.num_inference_steps = 50  # DDIM optimal: 50 steps = DDPM 500 steps quality
 
         # disable torch.compile to save memory (CUDA graphs use too much)
         self.use_compile = False
