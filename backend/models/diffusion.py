@@ -111,7 +111,14 @@ class MaskConditionedDDPM(nn.Module):
 
         # Set timesteps for DDIM scheduler
         # DDIM automatically creates optimal timestep spacing
-        self.inference_scheduler.set_timesteps(num_inference_steps, device=masks.device)
+        # Note: device parameter may not be supported in older diffusers versions
+        try:
+            self.inference_scheduler.set_timesteps(num_inference_steps, device=masks.device)
+        except TypeError:
+            # Fallback for older diffusers versions without device parameter
+            self.inference_scheduler.set_timesteps(num_inference_steps)
+            # Move timesteps to correct device
+            self.inference_scheduler.timesteps = self.inference_scheduler.timesteps.to(masks.device)
 
         # DDIM denoising loop
         for t in self.inference_scheduler.timesteps:
@@ -119,12 +126,19 @@ class MaskConditionedDDPM(nn.Module):
             model_input = torch.cat([image, masks], dim=1)
 
             # Predict noise residual
-            timestep = torch.tensor([t] * batch_size, device=masks.device)
+            # Ensure timestep is a tensor on the correct device with correct dtype
+            if isinstance(t, torch.Tensor):
+                timestep = t.unsqueeze(0).expand(batch_size).to(masks.device)
+            else:
+                timestep = torch.tensor([t] * batch_size, device=masks.device, dtype=torch.long)
+
             noise_pred = self.model(model_input, timestep).sample
 
             # DDIM step: compute previous noisy sample
             # Uses deterministic reverse process (eta=0 by default)
-            image = self.inference_scheduler.step(noise_pred, t, image).prev_sample
+            # Ensure t is properly handled (int or tensor)
+            t_value = t.item() if isinstance(t, torch.Tensor) else t
+            image = self.inference_scheduler.step(noise_pred, t_value, image).prev_sample
 
         return image
 
