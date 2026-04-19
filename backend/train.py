@@ -71,8 +71,18 @@ def detect_hardware(config):
         vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
         gpu_name = torch.cuda.get_device_name(0)
 
-        # VRAM-based batch sizing
-        config.train_batch_size = max(4, min(48, int(vram_gb * 1.5)))
+        # VRAM-based batch sizing with higher caps for large GPUs
+        # Conservative for small GPUs, aggressive for A100/H100
+        if vram_gb >= 40:
+            # A100/H100: Can handle much larger batches
+            config.train_batch_size = max(4, min(128, int(vram_gb * 1.2)))
+        elif vram_gb >= 24:
+            # RTX 3090/4090, V100 32GB
+            config.train_batch_size = max(4, min(64, int(vram_gb * 1.5)))
+        else:
+            # T4, RTX 2060, smaller GPUs
+            config.train_batch_size = max(4, min(32, int(vram_gb * 2.0)))
+
         config.eval_batch_size = config.train_batch_size * 2
         config.device = "cuda"
 
