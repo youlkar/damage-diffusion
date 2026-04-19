@@ -78,7 +78,7 @@ class TrainingConfig:
     num_workers = 4
     pin_memory = True
     device = "cuda"
-    use_compile = True  # enable torch.compile by default
+    use_compile = False  # Disabled: incompatible with diffusers DDPM scheduler (causes cudagraph partition)
 
     def __init__(self):
         # create output directories
