@@ -308,7 +308,7 @@ class Trainer:
                 self.writer.add_figure('samples/generated', fig, epoch)
 
             # Compute FID and KID if enabled
-            if self.config.compute_metrics and (epoch + 1) % self.config.metrics_every_epochs == 0:
+            if self.config.compute_metrics and epoch % self.config.metrics_every_epochs == 0:
                 print("Computing FID and KID scores...")
                 try:
                     fid_score, kid_score = self.compute_fid_kid()

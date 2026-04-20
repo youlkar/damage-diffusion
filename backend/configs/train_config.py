@@ -67,7 +67,7 @@ class TrainingConfig:
 
     # evaluation metrics
     compute_metrics = True
-    metrics_every_epochs = 10
+    metrics_every_epochs = 5
     num_metrics_samples = 1000
 
     # data augmentation
