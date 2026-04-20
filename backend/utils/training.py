@@ -8,11 +8,11 @@ from torch.cuda.amp import GradScaler
 from pathlib import Path
 from tqdm import tqdm
 import time
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 import json
 
-from .metrics import MetricsTracker, compute_fid_score
-from .visualization import visualize_samples, save_samples, plot_training_curves
+from .metrics import MetricsTracker, compute_fid_score, compute_fid_kid_scores
+from .visualization import visualize_samples, save_samples, plot_training_curves, plot_metrics
 from models.diffusion import EMAModel
 
 
@@ -307,16 +307,18 @@ class Trainer:
                 # Log to TensorBoard
                 self.writer.add_figure('samples/generated', fig, epoch)
 
-            # Compute FID if enabled
-            if self.config.compute_fid and (epoch + 1) % self.config.fid_every_epochs == 0:
-                print("Computing FID score...")
+            # Compute FID and KID if enabled
+            if self.config.compute_metrics and (epoch + 1) % self.config.metrics_every_epochs == 0:
+                print("Computing FID and KID scores...")
                 try:
-                    fid_score = self.compute_fid()
-                    self.metrics_tracker.update(fid_score=fid_score)
+                    fid_score, kid_score = self.compute_fid_kid()
+                    self.metrics_tracker.update(fid_score=fid_score, kid_score=kid_score)
                     self.writer.add_scalar('metrics/fid', fid_score, epoch)
+                    self.writer.add_scalar('metrics/kid', kid_score, epoch)
                     print(f"FID Score: {fid_score:.2f}")
+                    print(f"KID Score: {kid_score:.2f}")
                 except Exception as e:
-                    print(f"Failed to compute FID: {e}")
+                    print(f"Failed to compute FID or KID: {e}")
 
         # Save final checkpoint
         self.save_checkpoint('final_model.pt', is_best=False)
@@ -330,6 +332,18 @@ class Trainer:
             self.metrics_tracker.metrics['val_loss'],
             save_path=f"{self.config.log_dir}/training_curves.png"
         )
+        
+        plot_metrics(
+            self.metrics_tracker.metrics['fid_score'],
+            'FID',
+            save_path=f"{self.config.log_dir}/fid_scores.png"
+        )
+        
+        plot_metrics(
+            self.metrics_tracker.metrics['kid_score'],
+            'KID',
+            save_path=f"{self.config.log_dir}/kid_scores.png"
+        )
 
         elapsed_time = time.time() - start_time
         print(f"\n{'='*60}")
@@ -339,6 +353,7 @@ class Trainer:
 
         self.writer.close()
 
+    # Possibly deprecated
     @torch.no_grad()
     def compute_fid(self) -> float:
         # compute FID score on validation set
@@ -352,11 +367,11 @@ class Trainer:
             real_images.append(images)
             masks_for_generation.append(masks)
 
-            if len(real_images) * images.shape[0] >= self.config.num_fid_samples:
+            if len(real_images) * images.shape[0] >= self.config.num_metrics_samples:
                 break
 
-        real_images = torch.cat(real_images, dim=0)[:self.config.num_fid_samples]
-        masks_for_generation = torch.cat(masks_for_generation, dim=0)[:self.config.num_fid_samples]
+        real_images = torch.cat(real_images, dim=0)[:self.config.num_metrics_samples]
+        masks_for_generation = torch.cat(masks_for_generation, dim=0)[:self.config.num_metrics_samples]
 
         # Generate fake images
         generated_images = []
@@ -382,3 +397,48 @@ class Trainer:
         fid = compute_fid_score(real_images, generated_images, device=self.device)
 
         return fid
+
+    # Computing FID and KID metrics together to avoid regenerating for each
+    @torch.no_grad()
+    def compute_fid_kid(self) -> Tuple[float, float]:
+        # compute scores on validation set
+        self.model.eval()
+
+        # Collect real images
+        real_images = []
+        masks_for_generation = []
+
+        for images, masks in self.val_loader:
+            real_images.append(images)
+            masks_for_generation.append(masks)
+
+            if len(real_images) * images.shape[0] >= self.config.num_metrics_samples:
+                break
+
+        real_images = torch.cat(real_images, dim=0)[:self.config.num_metrics_samples]
+        masks_for_generation = torch.cat(masks_for_generation, dim=0)[:self.config.num_metrics_samples]
+
+        # Generate fake images
+        generated_images = []
+        batch_size = self.config.eval_batch_size
+
+        if self.ema is not None:
+            self.ema.apply_shadow(self.model)
+
+        for i in range(0, len(masks_for_generation), batch_size):
+            batch_masks = masks_for_generation[i:i+batch_size].to(self.device)
+            batch_generated = self.model.generate(
+                batch_masks,
+                num_inference_steps=self.config.num_inference_steps
+            )
+            generated_images.append(batch_generated.cpu())
+
+        if self.ema is not None:
+            self.ema.restore(self.model)
+
+        generated_images = torch.cat(generated_images, dim=0)
+
+        # Compute scores
+        fid, kid = compute_fid_kid_scores(real_images, generated_images)
+
+        return fid, kid

@@ -113,6 +113,28 @@ def plot_training_curves(
 
     return fig
 
+def plot_metrics(
+    metric: list,
+    metric_label: str,
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    # plot training and validation loss curves
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    ax.plot(metric, label=metric_label, linewidth=2)
+    ax.set_xlabel('Epoch', fontsize=12)
+    ax.set_ylabel(metric_label, fontsize=12)
+    ax.set_title(f'{metric} by Epoch', fontsize=14, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    if save_path:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Saved training curves to {save_path}")
+
+    return fig
 
 def create_mask_overlay(
     images: torch.Tensor,

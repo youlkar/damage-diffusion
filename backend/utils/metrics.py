@@ -8,6 +8,8 @@ from pathlib import Path
 from pytorch_fid.fid_score import calculate_frechet_distance
 from pytorch_fid.inception import InceptionV3
 from torchvision import transforms
+from torchmetrics.image.fid import FrechetInceptionDistance
+from torchmetrics.image.kid import KernelInceptionDistance
 
 
 def compute_fid_score(
@@ -70,6 +72,25 @@ def compute_fid_score(
 
     return fid
 
+def compute_fid_kid_scores(real_images: torch.Tensor,
+    generated_images: torch.Tensor
+) -> Tuple[float, float]:
+    # compute FID
+    fid = FrechetInceptionDistance(feature=64)
+    fid.update(real_images, real=True)
+    fid.update(generated_images, real=False)
+    fid_tens = fid.compute()
+    fid_score = fid_tens[0]
+    fid.reset()
+    
+    # compute KID
+    kid = KernelInceptionDistance()
+    kid.update(real_images, real=True)
+    kid.update(generated_images, real=False)
+    kid_tens = kid.compute()
+    kid_mean = kid_tens[0]
+    kid.reset()
+    return fid_score, kid_mean
 
 def compute_iou(
     pred_mask: torch.Tensor,
@@ -141,6 +162,7 @@ class MetricsTracker:
             'train_loss': [],
             'val_loss': [],
             'fid_score': [],
+            'kid_score': [],
             'learning_rate': [],
             'epoch': [],
         }
