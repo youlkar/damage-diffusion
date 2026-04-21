@@ -309,7 +309,7 @@ class Trainer:
 
             # Compute FID and KID if enabled
             if self.config.compute_metrics and epoch % self.config.metrics_every_epochs == 0:
-                print("Computing FID and KID scores...")
+                print("Computing metrics...")
                 try:
                     fid_score, kid_score = self.compute_fid_kid()
                     self.metrics_tracker.update(fid_score=fid_score, kid_score=kid_score)
