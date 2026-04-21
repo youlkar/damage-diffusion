@@ -116,12 +116,14 @@ def plot_training_curves(
 def plot_metrics(
     metric: list,
     metric_label: str,
+    num_epochs: int,
+    num_between_epochs: int,
     save_path: Optional[str] = None,
 ) -> plt.Figure:
     # plot training and validation loss curves
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    ax.plot(metric, label=metric_label, linewidth=2)
+    ax.plot(metric, range(0, num_epochs, num_between_epochs), label=metric_label, linewidth=2)
     ax.set_xlabel('Epoch', fontsize=12)
     ax.set_ylabel(metric_label, fontsize=12)
     ax.set_title(f'{metric_label} by Epoch', fontsize=14, fontweight='bold')

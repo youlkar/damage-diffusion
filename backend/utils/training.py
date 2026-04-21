@@ -336,12 +336,16 @@ class Trainer:
         plot_metrics(
             self.metrics_tracker.metrics['fid_score'],
             'FID',
+            self.config.num_epochs,
+            self.config.metrics_every_epochs,
             save_path=f"{self.config.log_dir}/fid_scores.png"
         )
         
         plot_metrics(
             self.metrics_tracker.metrics['kid_score'],
             'KID',
+            self.config.num_epochs,
+            self.config.metrics_every_epochs,
             save_path=f"{self.config.log_dir}/kid_scores.png"
         )
 
