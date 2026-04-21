@@ -103,7 +103,7 @@ def compute_fid_kid_scores(real_images: torch.Tensor,
         fid.update(real_images_proc, real=True)
         fid.update(gen_images_proc, real=False)
         fid_tens = fid.compute()
-        fid_score = fid_tens.item()
+        fid_score = fid_tens.cpu().item()
         fid.reset()
         
         # compute KID
@@ -113,7 +113,7 @@ def compute_fid_kid_scores(real_images: torch.Tensor,
         kid.update(real_images_proc, real=True)
         kid.update(gen_images_proc, real=False)
         kid_tens = kid.compute()
-        kid_mean = kid_tens[0]
+        kid_mean = kid_tens[0].cpu().item()
         kid.reset()
         return fid_score, kid_mean
 
