@@ -108,7 +108,7 @@ def compute_fid_kid_scores(real_images: torch.Tensor,
         
         # compute KID
         print("Computing KID...")
-        kid = KernelInceptionDistance(normalize=True)
+        kid = KernelInceptionDistance(normalize=True, subset_size=len(real_images_proc))
         kid.to(device)
         kid.update(real_images_proc, real=True)
         kid.update(gen_images_proc, real=False)
