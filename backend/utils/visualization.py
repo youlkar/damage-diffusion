@@ -121,10 +121,10 @@ def plot_metrics(
     # plot training and validation loss curves
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    ax.plot(metric, label=metric_label, linewidth=2)
+    ax.plot(metric.cpu(), label=metric_label, linewidth=2)
     ax.set_xlabel('Epoch', fontsize=12)
     ax.set_ylabel(metric_label, fontsize=12)
-    ax.set_title(f'{metric} by Epoch', fontsize=14, fontweight='bold')
+    ax.set_title(f'{metric_label} by Epoch', fontsize=14, fontweight='bold')
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
