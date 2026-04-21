@@ -68,7 +68,7 @@ class TrainingConfig:
     # evaluation metrics
     compute_metrics = True
     metrics_every_epochs = 5
-    num_metrics_samples = 500
+    num_metrics_samples = 100
 
     # data augmentation
     horizontal_flip = True
