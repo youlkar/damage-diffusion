@@ -73,9 +73,9 @@ def compute_fid_score(
     return fid
 
 def compute_fid_kid_scores(real_images: torch.Tensor,
-    generated_images: torch.Tensor
+    generated_images: torch.Tensor,
+    device: str = 'cuda'
 ) -> Tuple[float, float]:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     # compute FID
     print("Computing FID...")
     fid = FrechetInceptionDistance(feature=64)

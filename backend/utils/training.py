@@ -408,7 +408,8 @@ class Trainer:
         real_images = []
         masks_for_generation = []
 
-        for images, masks in tqdm(self.val_loader, desc="Loading images"):
+        print("Loading images...")
+        for images, masks in self.val_loader:
             real_images.append(images)
             masks_for_generation.append(masks)
 
@@ -426,7 +427,7 @@ class Trainer:
             self.ema.apply_shadow(self.model)
 
         progress_bar = tqdm(range(0, len(masks_for_generation), batch_size), desc=f"Generating images")
-        for i in enumerate(progress_bar):
+        for batch_idx, i in enumerate(progress_bar):
             batch_masks = masks_for_generation[i:i+batch_size].to(self.device)
             batch_generated = self.model.generate(
                 batch_masks,
@@ -440,6 +441,6 @@ class Trainer:
         generated_images = torch.cat(generated_images, dim=0)
 
         # Compute scores
-        fid, kid = compute_fid_kid_scores(real_images, generated_images)
+        fid, kid = compute_fid_kid_scores(real_images, generated_images, self.device)
 
         return fid, kid
