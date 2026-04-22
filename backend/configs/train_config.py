@@ -62,7 +62,7 @@ class TrainingConfig:
     log_every_steps = 100
     eval_every_epochs = 5
     generate_samples_every_epochs = 5
-    num_inference_steps = 50
+    num_inference_steps = 50  # DDIM: 50 steps gives excellent quality (10x faster than DDPM 500)
     num_samples_to_generate = 8
 
     # evaluation metrics
@@ -78,7 +78,7 @@ class TrainingConfig:
     num_workers = 4
     pin_memory = True
     device = "cuda"
-    use_compile = True  # enable torch.compile by default
+    use_compile = False  # Disabled: incompatible with diffusers DDPM scheduler (causes cudagraph partition)
 
     def __init__(self):
         # create output directories
@@ -106,6 +106,11 @@ class MediumTrainingConfig(TrainingConfig):
         self.num_samples_to_generate = 6
         self.num_inference_steps = 50
 
+        # FID optimization for medium config
+        self.num_fid_samples = 500  # Use 500 instead of 1000
+        self.fid_every_epochs = 25  # Compute less frequently
+        self.compute_fid = False  # Disable for speed, enable manually if needed
+
         # disable torch.compile to save memory
         self.use_compile = False
 
@@ -125,7 +130,11 @@ class FastTrainingConfig(TrainingConfig):
 
         # reduce memory usage during sample generation
         self.num_samples_to_generate = 4
-        self.num_inference_steps = 50  # Increase inference steps
+        self.num_inference_steps = 50  # DDIM optimal: 50 steps = DDPM 500 steps quality
+
+        # disable torch.compile to save memory (CUDA graphs use too much)
+        self.use_compile = False
+        self.compute_fid = False  # Disable FID entirely for fast training
 
         # disable torch.compile to save memory (CUDA graphs use too much)
         self.use_compile = False

@@ -71,8 +71,18 @@ def detect_hardware(config):
         vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
         gpu_name = torch.cuda.get_device_name(0)
 
-        # VRAM-based batch sizing
-        config.train_batch_size = max(4, min(48, int(vram_gb * 1.5)))
+        # VRAM-based batch sizing with higher caps for large GPUs
+        # Conservative for small GPUs, aggressive for A100/H100
+        if vram_gb >= 40:
+            # A100/H100: Can handle much larger batches
+            config.train_batch_size = max(4, min(128, int(vram_gb * 1.2)))
+        elif vram_gb >= 24:
+            # RTX 3090/4090, V100 32GB
+            config.train_batch_size = max(4, min(64, int(vram_gb * 1.5)))
+        else:
+            # T4, RTX 2060, smaller GPUs
+            config.train_batch_size = max(4, min(32, int(vram_gb * 2.0)))
+
         config.eval_batch_size = config.train_batch_size * 2
         config.device = "cuda"
 
@@ -137,15 +147,16 @@ def main():
     if args.config == 'fast':
         config = FastTrainingConfig()
         print("\n" + "-"*50)
-        print("Fast training config approx 2-4 hrs")
+        print("IMPROVED Fast Training Config (4-6 hours)")
         print("-"*50)
-        print("20% data subset")
-        print("30 epochs")
-        print("Smaller model (12M params)")
-        print("100 timesteps")
+        print("50% data subset (vs 20% before)")
+        print("50 epochs (vs 30 before)")
+        print("Medium model (~25M params vs 12M before)")
+        print("500 timesteps (vs 100 before - CRITICAL FIX)")
         print("-"*50)
-        print(f"DEBUG: After FastConfig creation:")
+        print(f"Verified config values:")
         print(f"num_epochs = {config.num_epochs}")
+        print(f"subset_ratio = {config.subset_ratio}")
         print(f"block_out_channels = {config.block_out_channels}")
         print(f"num_train_timesteps = {config.num_train_timesteps}")
         print("-"*50 + "\n")
