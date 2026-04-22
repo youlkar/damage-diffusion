@@ -66,9 +66,9 @@ class TrainingConfig:
     num_samples_to_generate = 8
 
     # evaluation metrics
-    compute_fid = True
-    fid_every_epochs = 10
-    num_fid_samples = 1000
+    compute_metrics = True
+    metrics_every_epochs = 10
+    num_metrics_samples = 1000
 
     # data augmentation
     horizontal_flip = True
