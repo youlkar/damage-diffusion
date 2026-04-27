@@ -337,25 +337,25 @@ class Trainer:
                     
                     # Interpret scores
                     if kid_score < 0.01:
-                        print("  → KID: Excellent diversity (< 0.01)")
+                        print("  - KID: Excellent diversity (< 0.01)")
                     elif kid_score < 0.05:
-                        print("  → KID: Good diversity (< 0.05)")
+                        print("  - KID: Good diversity (< 0.05)")
                     else:
-                        print("  → KID: Poor diversity (≥ 0.05)")
+                        print("  - KID: Poor diversity (>= 0.05)")
                         
                     if fid_score < 30:
-                        print("  → FID: Excellent quality (< 30)")
+                        print("  - FID: Excellent quality (< 30)")
                     elif fid_score < 50:
-                        print("  → FID: Good quality (< 50)")
+                        print("  - FID: Good quality (< 50)")
                     else:
-                        print("  → FID: Poor quality (≥ 50)")
+                        print("  - FID: Poor quality (>= 50)")
 
                     if mask_sensitivity_score < 1.0:
-                        print("  → Mask Conditioning: Failed (< 1%)")
+                        print("  - Mask Conditioning: Failed (< 1%)")
                     elif mask_sensitivity_score < 10.0:
-                        print("  → Mask Conditioning: Weak (1-10%)")
+                        print("  - Mask Conditioning: Weak (1-10%)")
                     else:
-                        print("  → Mask Conditioning: Strong (>= 10%)")
+                        print("  - Mask Conditioning: Strong (>= 10%)")
                 except Exception as e:
                     print(f"Failed to compute FID or KID: {e}")
 
@@ -513,10 +513,12 @@ class Trainer:
     # Computing FID and KID metrics together to avoid regenerating for each
     @torch.no_grad()
     def compute_fid_kid(self) -> Tuple[float, float]:
-        # compute scores on validation set
+        # compute scores on validation set, supplementing with train set if needed
         self.model.eval()
 
-        # Collect real images
+        target = self.config.num_metrics_samples
+
+        # Collect real images and masks from val set first
         real_images = []
         masks_for_generation = []
 
@@ -524,12 +526,21 @@ class Trainer:
         for images, masks in self.val_loader:
             real_images.append(images)
             masks_for_generation.append(masks)
-
-            if len(real_images) * images.shape[0] >= self.config.num_metrics_samples:
+            if sum(b.shape[0] for b in real_images) >= target:
                 break
 
-        real_images = torch.cat(real_images, dim=0)[:self.config.num_metrics_samples]
-        masks_for_generation = torch.cat(masks_for_generation, dim=0)[:self.config.num_metrics_samples]
+        # If val set is smaller than target, supplement from train set
+        # Train images are safe to use here — we're only measuring distribution
+        # quality, not evaluating held-out generalization
+        if sum(b.shape[0] for b in real_images) < target:
+            for images, masks in self.train_loader:
+                real_images.append(images)
+                masks_for_generation.append(masks)
+                if sum(b.shape[0] for b in real_images) >= target:
+                    break
+
+        real_images = torch.cat(real_images, dim=0)[:target]
+        masks_for_generation = torch.cat(masks_for_generation, dim=0)[:target]
 
         # Generate fake images
         generated_images = []

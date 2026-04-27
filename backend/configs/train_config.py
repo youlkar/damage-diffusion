@@ -62,13 +62,13 @@ class TrainingConfig:
     log_every_steps = 100
     eval_every_epochs = 5
     generate_samples_every_epochs = 5
-    num_inference_steps = 50  # DDIM: 50 steps gives excellent quality (10x faster than DDPM 500)
+    num_inference_steps = 100  # 100 steps: better image quality for reliable FID/KID measurement
     num_samples_to_generate = 8
 
     # evaluation metrics (KID/FID)
     compute_metrics = True  # Enable KID/FID computation
     metrics_every_epochs = 10  # Compute every 10 epochs
-    num_metrics_samples = 1000  # Use 1000 samples for accurate metrics
+    num_metrics_samples = 2048  # 2048 minimum for statistically reliable FID/KID
 
     # Enhanced stochastic data augmentation for better KID/FID scores
     horizontal_flip = True

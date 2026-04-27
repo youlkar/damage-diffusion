@@ -1,5 +1,5 @@
 # Evaluation metrics for generative model quality assessment.
-# Includes FID (Fréchet Inception Distance) and IoU calculations.
+# Includes FID (Frechet Inception Distance) and IoU calculations.
 
 import torch
 import numpy as np
@@ -106,8 +106,8 @@ def compute_fid_kid_scores(real_images: torch.Tensor,
         
         # compute KID with proper subset size
         print("Computing KID...")
-        # Use proper subset size (50-100 for reliable KID estimation)
-        kid_subset_size = max(2, min(50, len(real_images_proc) // 2))
+        # subset_size must be <= number of samples; 1000 is the standard for low-variance KID
+        kid_subset_size = min(1000, len(real_images_proc))
         kid = KernelInceptionDistance(normalize=True, subset_size=kid_subset_size)
         kid.to(device)
         kid.update(real_images_proc, real=True)
@@ -119,7 +119,7 @@ def compute_fid_kid_scores(real_images: torch.Tensor,
         kid_std = kid_result[1].cpu().item()
         kid.reset()
         
-        print(f"KID: {kid_mean:.4f} ± {kid_std:.4f} (subset_size={kid_subset_size})")
+        print(f"KID: {kid_mean:.4f} +/- {kid_std:.4f} (subset_size={kid_subset_size})")
         return fid_score, kid_mean
 
 def compute_iou(
