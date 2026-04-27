@@ -77,28 +77,26 @@ def compute_fid_kid_scores(real_images: torch.Tensor,
     device: str = 'cuda'
 ) -> Tuple[float, float]:
     
-    # normalize images from [-1, 1] to [0, 1] then to inception's expected range
-    def preprocess_for_inception(images):
+    # torchmetrics with normalize=True expects float tensors in [0, 1].
+    # Do not apply ImageNet mean/std normalization here.
+    def preprocess_for_torchmetrics(images):
         # denormalize from [-1, 1] to [0, 1]
         images = (images + 1.0) / 2.0
+        images = images.clamp(0.0, 1.0)
 
-        # resize to 299x299 (inception input size)
+        # resize to inception input size
         resize = transforms.Resize((299, 299))
         images = torch.stack([resize(img) for img in images])
-
-        # normalize to inception's expected range
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                        std=[0.229, 0.224, 0.225])
-        images = torch.stack([normalize(img) for img in images])
         return images
     
     with torch.no_grad():
-        real_images_proc = preprocess_for_inception(real_images).to(device)
-        gen_images_proc = preprocess_for_inception(generated_images).to(device)
+        real_images_proc = preprocess_for_torchmetrics(real_images).to(device)
+        gen_images_proc = preprocess_for_torchmetrics(generated_images).to(device)
     
         # compute FID
         print("Computing FID...")
-        fid = FrechetInceptionDistance(feature=64, normalize=True)
+        # Use standard FID feature dimensionality for comparability.
+        fid = FrechetInceptionDistance(feature=2048, normalize=True)
         fid.to(device)
         fid.update(real_images_proc, real=True)
         fid.update(gen_images_proc, real=False)
@@ -106,15 +104,22 @@ def compute_fid_kid_scores(real_images: torch.Tensor,
         fid_score = fid_tens.cpu().item()
         fid.reset()
         
-        # compute KID
+        # compute KID with proper subset size
         print("Computing KID...")
-        kid = KernelInceptionDistance(normalize=True, subset_size=len(real_images_proc))
+        # Use proper subset size (50-100 for reliable KID estimation)
+        kid_subset_size = max(2, min(50, len(real_images_proc) // 2))
+        kid = KernelInceptionDistance(normalize=True, subset_size=kid_subset_size)
         kid.to(device)
         kid.update(real_images_proc, real=True)
         kid.update(gen_images_proc, real=False)
-        kid_tens = kid.compute()
-        kid_mean = kid_tens[0].cpu().item()
+        kid_result = kid.compute()
+        
+        # KID returns (mean, std) - use mean with confidence info
+        kid_mean = kid_result[0].cpu().item()
+        kid_std = kid_result[1].cpu().item()
         kid.reset()
+        
+        print(f"KID: {kid_mean:.4f} ± {kid_std:.4f} (subset_size={kid_subset_size})")
         return fid_score, kid_mean
 
 def compute_iou(
@@ -188,6 +193,7 @@ class MetricsTracker:
             'val_loss': [],
             'fid_score': [],
             'kid_score': [],
+            'mask_sensitivity_score': [],
             'learning_rate': [],
             'epoch': [],
         }

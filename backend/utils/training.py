@@ -315,15 +315,47 @@ class Trainer:
                     print(f"{'-'*50}\n")
 
             # Compute FID and KID if enabled
-            if self.config.compute_metrics and epoch % self.config.metrics_every_epochs == 0:
+            compute_enabled = getattr(self.config, 'compute_metrics', False)
+            metrics_interval = getattr(self.config, 'metrics_every_epochs', 10)
+            if compute_enabled and (epoch + 1) % metrics_interval == 0:
                 print("Computing metrics...")
                 try:
                     fid_score, kid_score = self.compute_fid_kid()
-                    self.metrics_tracker.update(fid_score=fid_score, kid_score=kid_score)
+                    mask_sensitivity_score = self.compute_mask_sensitivity_score()
+                    self.metrics_tracker.update(
+                        fid_score=fid_score,
+                        kid_score=kid_score,
+                        mask_sensitivity_score=mask_sensitivity_score
+                    )
                     self.writer.add_scalar('metrics/fid', fid_score, epoch)
                     self.writer.add_scalar('metrics/kid', kid_score, epoch)
-                    print(f"FID Score: {fid_score:.2f}")
-                    print(f"KID Score: {kid_score:.2f}")
+                    self.writer.add_scalar('metrics/mask_sensitivity', mask_sensitivity_score, epoch)
+                    
+                    print(f"FID Score: {fid_score:.3f}")
+                    print(f"KID Score: {kid_score:.6f}")  # KID values are typically much smaller
+                    print(f"Mask Sensitivity Score: {mask_sensitivity_score:.2f}%")
+                    
+                    # Interpret scores
+                    if kid_score < 0.01:
+                        print("  → KID: Excellent diversity (< 0.01)")
+                    elif kid_score < 0.05:
+                        print("  → KID: Good diversity (< 0.05)")
+                    else:
+                        print("  → KID: Poor diversity (≥ 0.05)")
+                        
+                    if fid_score < 30:
+                        print("  → FID: Excellent quality (< 30)")
+                    elif fid_score < 50:
+                        print("  → FID: Good quality (< 50)")
+                    else:
+                        print("  → FID: Poor quality (≥ 50)")
+
+                    if mask_sensitivity_score < 1.0:
+                        print("  → Mask Conditioning: Failed (< 1%)")
+                    elif mask_sensitivity_score < 10.0:
+                        print("  → Mask Conditioning: Weak (1-10%)")
+                    else:
+                        print("  → Mask Conditioning: Strong (>= 10%)")
                 except Exception as e:
                     print(f"Failed to compute FID or KID: {e}")
 
@@ -431,14 +463,7 @@ class Trainer:
         masks = torch.cat([mask1, mask2], dim=0)
         timestep = torch.tensor([500, 500], device=self.device)
         
-        # Get model predictions
-        model_input = torch.cat([noisy_image, masks], dim=1)
-        output = self.model.model(model_input, timestep).sample
-        
-        # Calculate difference
-        diff = (output[0] - output[1]).abs().mean()
-        output_scale = output.abs().mean()
-        relative_diff = (diff / output_scale * 100)
+        relative_diff = self._compute_relative_mask_difference(noisy_image, masks, timestep)
         
         print(f"Mask sensitivity test:")
         print(f"Relative difference: {relative_diff:.2f}%")
@@ -452,6 +477,38 @@ class Trainer:
         else:
             print("RESULT: GOOD mask conditioning")
             print("Action: Model successfully learned mask-conditioned generation")
+
+    @torch.no_grad()
+    def compute_mask_sensitivity_score(self) -> float:
+        """Fast proxy metric: how much outputs change when only masks change."""
+        self.model.eval()
+
+        batch_size = 2
+        noisy_image = torch.randn(batch_size, 3, self.config.image_size, self.config.image_size, device=self.device)
+
+        mask1 = torch.zeros(1, 1, self.config.image_size, self.config.image_size, device=self.device)
+        mask1[0, 0, self.config.image_size // 2, :] = 1.0
+        mask2 = torch.zeros(1, 1, self.config.image_size, self.config.image_size, device=self.device)
+        mask2[0, 0, :, self.config.image_size // 2] = 1.0
+        masks = torch.cat([mask1, mask2], dim=0)
+        timestep = torch.tensor([500, 500], device=self.device)
+
+        return self._compute_relative_mask_difference(noisy_image, masks, timestep)
+
+    @torch.no_grad()
+    def _compute_relative_mask_difference(
+        self,
+        noisy_image: torch.Tensor,
+        masks: torch.Tensor,
+        timestep: torch.Tensor
+    ) -> float:
+        model_input = torch.cat([noisy_image, masks], dim=1)
+        output = self.model.model(model_input, timestep).sample
+
+        diff = (output[0] - output[1]).abs().mean()
+        output_scale = output.abs().mean().clamp_min(1e-8)
+        relative_diff = (diff / output_scale * 100).item()
+        return relative_diff
 
     # Computing FID and KID metrics together to avoid regenerating for each
     @torch.no_grad()
