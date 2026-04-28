@@ -49,7 +49,7 @@ class CrackSegmentationDataset(Dataset):
             self.transform = transforms.Compose([
                 transforms.Resize((image_size, image_size), interpolation=transforms.InterpolationMode.BILINEAR),
                 transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5])
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
             ])
         else:
             self.transform = transform

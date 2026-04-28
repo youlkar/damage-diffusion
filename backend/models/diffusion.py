@@ -150,22 +150,8 @@ class MaskConditionedDDPM(nn.Module):
         guidance_scale: float = 3.0,
         generator: Optional[torch.Generator] = None,
     ) -> torch.Tensor:
-        """
-        Generate images using classifier-free guidance (CFG).
+        # Classifier-free guidance (CFG) for mask-conditioned image generation.
 
-        Runs two forward passes per denoising step:
-          - conditioned:   noisy_image concatenated with the real mask
-          - unconditioned: noisy_image concatenated with an all-zero mask
-
-        The final noise prediction amplifies the difference between the two:
-          noise_pred = uncond + guidance_scale * (cond - uncond)
-
-        Higher guidance_scale pushes generation to follow the mask more strongly.
-        guidance_scale=1.0 is equivalent to standard generation with no guidance.
-        guidance_scale=3-7 is recommended for visible crack improvement.
-
-        The existing generate() method is unchanged and still works as before.
-        """
         batch_size = masks.shape[0]
 
         image = torch.randn(

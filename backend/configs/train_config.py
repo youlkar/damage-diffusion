@@ -70,16 +70,23 @@ class TrainingConfig:
     metrics_every_epochs = 10  # Compute every 10 epochs
     num_metrics_samples = 2048  # 2048 minimum for statistically reliable FID/KID
 
-    # Enhanced stochastic data augmentation for better KID/FID scores
+    # loss weighting and mask conditioning
+    crack_loss_weight = 10.0  # crack pixels get 10x loss weight vs background
+    mask_dropout_prob = 0.15  # fraction of batches where mask is zeroed for CFG training
+
+    # Augmentation: horizontal flip only.
+    # Rotation, cropping, and noise injection are disabled — at 128x128 these
+    # corrupt 1-3px wide crack structures, preventing the model from learning
+    # to generate them. Color jitter is also disabled to preserve crack contrast.
     horizontal_flip = True
-    random_rotation = True
-    rotation_degrees = 15  # Random rotation ±15 degrees
-    color_jitter = True
-    color_jitter_brightness = 0.1
-    color_jitter_contrast = 0.1
-    random_crop_scale = (0.9, 1.0)  # Random crop 90-100% of image
-    noise_injection = True
-    noise_injection_std = 0.02  # Add small amount of noise during training
+    random_rotation = False
+    rotation_degrees = 0
+    color_jitter = False
+    color_jitter_brightness = 0.0
+    color_jitter_contrast = 0.0
+    random_crop_scale = None
+    noise_injection = False
+    noise_injection_std = 0.0
 
     # hardware settings
     num_workers = 4

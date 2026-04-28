@@ -91,11 +91,26 @@ class Trainer:
             images = images.to(self.device, non_blocking=True, memory_format=torch.channels_last)
             masks = masks.to(self.device, non_blocking=True)
 
+            # Mask dropout: zero out masks for a fraction of batches so the model
+            # learns both conditioned and unconditioned generation. This enables
+            # CFG at inference to work correctly on the retrained checkpoint.
+            dropout_prob = getattr(self.config, 'mask_dropout_prob', 0.15)
+            if torch.rand(1).item() < dropout_prob:
+                training_masks = torch.zeros_like(masks)
+            else:
+                training_masks = masks
+
+            # Crack-weighted loss weight per pixel: crack pixels get higher weight.
+            # Fixes class imbalance where cracks are ~5% of pixels — without this
+            # the model ignores cracks and learns only concrete texture.
+            crack_weight_factor = getattr(self.config, 'crack_loss_weight', 10.0)
+            crack_weight = 1.0 + (crack_weight_factor - 1.0) * masks
+
             # Forward pass with mixed precision
             if self.use_amp:
                 with autocast(device_type='cuda', dtype=self.amp_dtype):
-                    noise_pred, noise, noisy_images = self.model(images, masks)
-                    loss = F.mse_loss(noise_pred, noise)
+                    noise_pred, noise, noisy_images = self.model(images, training_masks)
+                    loss = (F.mse_loss(noise_pred, noise, reduction='none') * crack_weight).mean()
 
                 # Backward pass with AMP
                 self.optimizer.zero_grad()
@@ -113,8 +128,8 @@ class Trainer:
                 self.scaler.update()
             else:
                 # Standard precision
-                noise_pred, noise, noisy_images = self.model(images, masks)
-                loss = F.mse_loss(noise_pred, noise)
+                noise_pred, noise, noisy_images = self.model(images, training_masks)
+                loss = (F.mse_loss(noise_pred, noise, reduction='none') * crack_weight).mean()
 
                 # Backward pass
                 self.optimizer.zero_grad()
