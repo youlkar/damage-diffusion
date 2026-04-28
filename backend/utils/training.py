@@ -69,6 +69,11 @@ class Trainer:
         self.scaler = GradScaler() if self.use_amp and config.mixed_precision == 'fp16' else None
         self.amp_dtype = torch.float16 if config.mixed_precision == 'fp16' else torch.bfloat16
 
+        # Pre-collect a fixed real image set for FID/KID evaluation.
+        # Using the same real images every evaluation run removes one source of
+        # variance from the FID/KID trend — only the generated distribution changes.
+        self._metrics_real_images, self._metrics_masks = self._collect_fixed_metrics_images()
+
         print(f"Trainer initialized on device: {device}")
         print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
         print(f"Mixed precision: {config.mixed_precision} (AMP: {self.use_amp})")
@@ -510,44 +515,50 @@ class Trainer:
         relative_diff = (diff / output_scale * 100).item()
         return relative_diff
 
-    # Computing FID and KID metrics together to avoid regenerating for each
     @torch.no_grad()
-    def compute_fid_kid(self) -> Tuple[float, float]:
-        # compute scores on validation set, supplementing with train set if needed
-        self.model.eval()
-
+    def _collect_fixed_metrics_images(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Collect a fixed set of real images and their masks once at init.
+        # Reusing the same real images every evaluation removes real-distribution
+        # variance from the FID/KID trend so only the generated side changes.
         target = self.config.num_metrics_samples
-
-        # Collect real images and masks from val set first
         real_images = []
-        masks_for_generation = []
+        masks = []
 
-        print("Loading images...")
-        for images, masks in self.val_loader:
-            real_images.append(images)
-            masks_for_generation.append(masks)
+        for imgs, msks in self.val_loader:
+            real_images.append(imgs)
+            masks.append(msks)
             if sum(b.shape[0] for b in real_images) >= target:
                 break
 
-        # If val set is smaller than target, supplement from train set
-        # Train images are safe to use here — we're only measuring distribution
-        # quality, not evaluating held-out generalization
+        # supplement from train set if val set is smaller than target
         if sum(b.shape[0] for b in real_images) < target:
-            for images, masks in self.train_loader:
-                real_images.append(images)
-                masks_for_generation.append(masks)
+            for imgs, msks in self.train_loader:
+                real_images.append(imgs)
+                masks.append(msks)
                 if sum(b.shape[0] for b in real_images) >= target:
                     break
 
         real_images = torch.cat(real_images, dim=0)[:target]
-        masks_for_generation = torch.cat(masks_for_generation, dim=0)[:target]
+        masks = torch.cat(masks, dim=0)[:target]
+        print(f"Fixed metrics image set collected: {len(real_images)} real images")
+        return real_images, masks
 
-        # Generate fake images
+    # Computing FID and KID metrics together to avoid regenerating for each
+    @torch.no_grad()
+    def compute_fid_kid(self) -> Tuple[float, float]:
+        self.model.eval()
+
+        # Use the fixed real image set collected at init — same every evaluation run
+        real_images = self._metrics_real_images
+        masks_for_generation = self._metrics_masks
+
+        print(f"Loading images... (using {len(real_images)} fixed real images)")
+
+        # Generate fake images using raw trained weights (not EMA)
+        # EMA needs ~10k steps to warm up; using it before then measures a worse
+        # model than what the visual samples show, adding inconsistency to FID/KID
         generated_images = []
         batch_size = self.config.eval_batch_size
-
-        if self.ema is not None:
-            self.ema.apply_shadow(self.model)
 
         progress_bar = tqdm(range(0, len(masks_for_generation), batch_size), desc=f"Generating images")
         for batch_idx, i in enumerate(progress_bar):
@@ -558,12 +569,14 @@ class Trainer:
             )
             generated_images.append(batch_generated.cpu())
 
-        if self.ema is not None:
-            self.ema.restore(self.model)
-
         generated_images = torch.cat(generated_images, dim=0)
 
-        # Compute scores
+        # Free GPU cache before metric computation — inception runs on CPU to avoid
+        # competing with model weights (~22GB) for the remaining VRAM
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # Compute scores — device arg kept for API compatibility but metrics run on CPU
         fid, kid = compute_fid_kid_scores(real_images, generated_images, self.device)
 
         return fid, kid
