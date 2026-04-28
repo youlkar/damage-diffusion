@@ -62,7 +62,7 @@ class TrainingConfig:
     log_every_steps = 100
     eval_every_epochs = 5
     generate_samples_every_epochs = 5
-    num_inference_steps = 100  # 100 steps: better image quality for reliable FID/KID measurement
+    num_inference_steps = 50  # DDIM: 50 steps gives excellent quality (10x faster than DDPM 500)
     num_samples_to_generate = 8
 
     # evaluation metrics (KID/FID)
@@ -113,10 +113,10 @@ class MediumTrainingConfig(TrainingConfig):
         self.num_samples_to_generate = 6
         self.num_inference_steps = 50
 
-        # KID/FID metrics for medium config  
-        self.compute_metrics = True  # Enable KID/FID computation
-        self.metrics_every_epochs = 25  # Compute every 25 epochs
-        self.num_metrics_samples = 500  # Use 500 samples (balanced speed vs accuracy)
+        # KID/FID metrics for medium config
+        self.compute_metrics = True
+        self.metrics_every_epochs = 25
+        self.num_metrics_samples = 2048  # 2048 generated samples; real set = full val set
 
         # disable torch.compile to save memory
         self.use_compile = False

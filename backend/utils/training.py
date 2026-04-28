@@ -517,30 +517,28 @@ class Trainer:
 
     @torch.no_grad()
     def _collect_fixed_metrics_images(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Collect a fixed set of real images and their masks once at init.
-        # Reusing the same real images every evaluation removes real-distribution
-        # variance from the FID/KID trend so only the generated side changes.
-        target = self.config.num_metrics_samples
+        # Collect the full val set once at init as a fixed real image pool.
+        # Using the same real images every evaluation removes real-distribution
+        # variance from FID/KID so only the generated side changes across epochs.
+        #
+        # We use ALL val images (961) rather than truncating to num_metrics_samples
+        # or tiling. Tiling would introduce duplicate samples that make the real
+        # covariance matrix near-singular and corrupt FID. The generated side uses
+        # num_metrics_samples (2048) masks — asymmetric counts are fine for FID/KID.
+        #
+        # val_loader is safe to exhaust here: validate() and generate_samples()
+        # both create fresh iterators via `for` loop and `next(iter(...))`,
+        # so this init read does not affect training or validation data ordering.
         real_images = []
         masks = []
 
         for imgs, msks in self.val_loader:
             real_images.append(imgs)
             masks.append(msks)
-            if sum(b.shape[0] for b in real_images) >= target:
-                break
 
-        # supplement from train set if val set is smaller than target
-        if sum(b.shape[0] for b in real_images) < target:
-            for imgs, msks in self.train_loader:
-                real_images.append(imgs)
-                masks.append(msks)
-                if sum(b.shape[0] for b in real_images) >= target:
-                    break
-
-        real_images = torch.cat(real_images, dim=0)[:target]
-        masks = torch.cat(masks, dim=0)[:target]
-        print(f"Fixed metrics image set collected: {len(real_images)} real images")
+        real_images = torch.cat(real_images, dim=0)
+        masks = torch.cat(masks, dim=0)
+        print(f"Fixed metrics image set collected: {len(real_images)} real val images")
         return real_images, masks
 
     # Computing FID and KID metrics together to avoid regenerating for each
@@ -552,15 +550,13 @@ class Trainer:
         real_images = self._metrics_real_images
         masks_for_generation = self._metrics_masks
 
-        print(f"Loading images... (using {len(real_images)} fixed real images)")
+        print(f"Generating {len(masks_for_generation)} images against {len(real_images)} fixed real images...")
 
         # Generate fake images using raw trained weights (not EMA)
-        # EMA needs ~10k steps to warm up; using it before then measures a worse
-        # model than what the visual samples show, adding inconsistency to FID/KID
         generated_images = []
         batch_size = self.config.eval_batch_size
 
-        progress_bar = tqdm(range(0, len(masks_for_generation), batch_size), desc=f"Generating images")
+        progress_bar = tqdm(range(0, len(masks_for_generation), batch_size), desc="Generating images")
         for batch_idx, i in enumerate(progress_bar):
             batch_masks = masks_for_generation[i:i+batch_size].to(self.device)
             batch_generated = self.model.generate(
