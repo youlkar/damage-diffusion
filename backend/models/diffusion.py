@@ -142,6 +142,69 @@ class MaskConditionedDDPM(nn.Module):
 
         return image
 
+    @torch.no_grad()
+    def generate_cfg(
+        self,
+        masks: torch.Tensor,
+        num_inference_steps: int = 50,
+        guidance_scale: float = 3.0,
+        generator: Optional[torch.Generator] = None,
+    ) -> torch.Tensor:
+        """
+        Generate images using classifier-free guidance (CFG).
+
+        Runs two forward passes per denoising step:
+          - conditioned:   noisy_image concatenated with the real mask
+          - unconditioned: noisy_image concatenated with an all-zero mask
+
+        The final noise prediction amplifies the difference between the two:
+          noise_pred = uncond + guidance_scale * (cond - uncond)
+
+        Higher guidance_scale pushes generation to follow the mask more strongly.
+        guidance_scale=1.0 is equivalent to standard generation with no guidance.
+        guidance_scale=3-7 is recommended for visible crack improvement.
+
+        The existing generate() method is unchanged and still works as before.
+        """
+        batch_size = masks.shape[0]
+
+        image = torch.randn(
+            (batch_size, 3, self.image_size, self.image_size),
+            generator=generator,
+            device=masks.device,
+        )
+
+        try:
+            self.inference_scheduler.set_timesteps(num_inference_steps, device=masks.device)
+        except TypeError:
+            self.inference_scheduler.set_timesteps(num_inference_steps)
+            self.inference_scheduler.timesteps = self.inference_scheduler.timesteps.to(masks.device)
+
+        # zero mask used for unconditional pass
+        uncond_masks = torch.zeros_like(masks)
+
+        for t in self.inference_scheduler.timesteps:
+            if isinstance(t, torch.Tensor):
+                timestep = t.unsqueeze(0).expand(batch_size).to(masks.device)
+            else:
+                timestep = torch.tensor([t] * batch_size, device=masks.device, dtype=torch.long)
+
+            # conditioned pass — real mask
+            model_input_cond = torch.cat([image, masks], dim=1)
+            noise_pred_cond = self.model(model_input_cond, timestep).sample
+
+            # unconditioned pass — zero mask
+            model_input_uncond = torch.cat([image, uncond_masks], dim=1)
+            noise_pred_uncond = self.model(model_input_uncond, timestep).sample
+
+            # CFG combination: amplify the mask-conditioned direction
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+
+            t_value = t.item() if isinstance(t, torch.Tensor) else t
+            image = self.inference_scheduler.step(noise_pred, t_value, image).prev_sample
+
+        return image
+
     def save_pretrained(self, save_directory: str):
         """Save model and schedulers for later use."""
         self.model.save_pretrained(f"{save_directory}/unet")

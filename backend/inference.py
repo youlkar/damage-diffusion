@@ -65,14 +65,22 @@ def generate_from_mask(
     mask: torch.Tensor,
     num_samples: int = 1,
     num_inference_steps: int = 50,
+    guidance_scale: float = 1.0,
     device: str = 'cuda',
 ):
-    # Repeat mask for multiple samples
     masks = mask.repeat(num_samples, 1, 1, 1).to(device)
 
-    # Generate
-    print(f"Generating {num_samples} samples with {num_inference_steps} steps...")
-    generated = model.generate(masks, num_inference_steps=num_inference_steps)
+    if guidance_scale > 1.0:
+        print(f"Generating {num_samples} samples with {num_inference_steps} steps "
+              f"and CFG guidance_scale={guidance_scale}...")
+        generated = model.generate_cfg(
+            masks,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+        )
+    else:
+        print(f"Generating {num_samples} samples with {num_inference_steps} steps...")
+        generated = model.generate(masks, num_inference_steps=num_inference_steps)
 
     return generated
 
@@ -91,7 +99,9 @@ def main():
     parser.add_argument('--num_samples', type=int, default=1,
                        help='Number of samples to generate per mask')
     parser.add_argument('--num_steps', type=int, default=50,
-                       help='Number of inference steps (50 for fast, 1000 for quality)')
+                       help='Number of inference steps (50 for fast, 500 for quality)')
+    parser.add_argument('--guidance_scale', type=float, default=1.0,
+                       help='CFG guidance scale (1.0=off, 3-7=recommended for crack visibility)')
     parser.add_argument('--device', type=str, default=None,
                        help='Device to use (cuda/mps/cpu)')
     parser.add_argument('--image_size', type=int, default=128,
@@ -129,6 +139,7 @@ def main():
             mask,
             num_samples=args.num_samples,
             num_inference_steps=args.num_steps,
+            guidance_scale=args.guidance_scale,
             device=device,
         )
 
@@ -155,6 +166,7 @@ def main():
                 mask,
                 num_samples=args.num_samples,
                 num_inference_steps=args.num_steps,
+                guidance_scale=args.guidance_scale,
                 device=device,
             )
 
