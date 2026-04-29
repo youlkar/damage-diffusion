@@ -96,8 +96,9 @@ def plot_training_curves(
     # plot training and validation loss curves
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    ax.plot(train_losses, label='Train Loss', linewidth=2)
-    ax.plot(val_losses, label='Validation Loss', linewidth=2)
+    epochs = list(range(len(train_losses)))
+    ax.plot(epochs, train_losses, label='Train Loss', linewidth=2)
+    ax.plot(epochs, val_losses, label='Validation Loss', linewidth=2)
     ax.set_xlabel('Epoch', fontsize=12)
     ax.set_ylabel('Loss', fontsize=12)
     ax.set_title('Training and Validation Loss', fontsize=14, fontweight='bold')
@@ -120,10 +121,14 @@ def plot_metrics(
     num_between_epochs: int,
     save_path: Optional[str] = None,
 ) -> plt.Figure:
-    # plot training and validation loss curves
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    ax.plot(metric, range(0, num_epochs, num_between_epochs), label=metric_label, linewidth=2)
+    # x = epoch numbers, y = metric values
+    # Use actual number of recorded points to avoid length mismatch when
+    # training was resumed mid-run and not all epochs were recorded
+    num_points = len(metric)
+    epochs = [num_between_epochs - 1 + i * num_between_epochs for i in range(num_points)]
+    ax.plot(epochs, metric, label=metric_label, linewidth=2, marker='o', markersize=4)
     ax.set_xlabel('Epoch', fontsize=12)
     ax.set_ylabel(metric_label, fontsize=12)
     ax.set_title(f'{metric_label} by Epoch', fontsize=14, fontweight='bold')

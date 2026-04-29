@@ -181,19 +181,10 @@ def main():
     else:
         config = TrainingConfig()
         print("\n" + "-"*50)
-        print("STOCHASTIC Full Training Config (8-16 hours)")
+        print("Full regular training config")
         print("-"*50)
-        print("100% data (full dataset)")
-        print("100 epochs")
-        print("Full model (~60M params)")
-        print("1000 timesteps")
-        print("ENHANCED STOCHASTIC AUGMENTATIONS:")
-        print("  - Random rotation +-15 degrees")
-        print("  - Color jittering")
-        print("  - Random cropping")
-        print("  - Noise injection")
-        print("KID/FID metrics: Every 10 epochs")
-        print("  - Best quality + diversity expected")
+        print("Auto detect hardware")
+        print("Batch sizing based on vram")
         print("-"*50 + "\n")
 
     # apply CLI overrides
