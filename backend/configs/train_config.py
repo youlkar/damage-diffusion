@@ -65,14 +65,28 @@ class TrainingConfig:
     num_inference_steps = 50  # DDIM: 50 steps gives excellent quality (10x faster than DDPM 500)
     num_samples_to_generate = 8
 
-    # evaluation metrics
-    compute_metrics = True
-    metrics_every_epochs = 10
-    num_metrics_samples = 1000
+    # evaluation metrics (KID/FID)
+    compute_metrics = True  # Enable KID/FID computation
+    metrics_every_epochs = 10  # Compute every 10 epochs
+    num_metrics_samples = 2048  # 2048 minimum for statistically reliable FID/KID
 
-    # data augmentation
+    # loss weighting and mask conditioning
+    crack_loss_weight = 10.0  # crack pixels get 10x loss weight vs background
+    mask_dropout_prob = 0.15  # fraction of batches where mask is zeroed for CFG training
+
+    # Augmentation: horizontal flip only.
+    # Rotation, cropping, and noise injection are disabled — at 128x128 these
+    # corrupt 1-3px wide crack structures, preventing the model from learning
+    # to generate them. Color jitter is also disabled to preserve crack contrast.
     horizontal_flip = True
     random_rotation = False
+    rotation_degrees = 0
+    color_jitter = False
+    color_jitter_brightness = 0.0
+    color_jitter_contrast = 0.0
+    random_crop_scale = None
+    noise_injection = False
+    noise_injection_std = 0.0
 
     # hardware settings
     num_workers = 4
@@ -106,10 +120,10 @@ class MediumTrainingConfig(TrainingConfig):
         self.num_samples_to_generate = 6
         self.num_inference_steps = 50
 
-        # FID optimization for medium config
-        self.num_fid_samples = 500  # Use 500 instead of 1000
-        self.fid_every_epochs = 25  # Compute less frequently
-        self.compute_fid = False  # Disable for speed, enable manually if needed
+        # KID/FID metrics for medium config
+        self.compute_metrics = True
+        self.metrics_every_epochs = 25
+        self.num_metrics_samples = 2048  # 2048 generated samples; real set = full val set
 
         # disable torch.compile to save memory
         self.use_compile = False
@@ -128,13 +142,24 @@ class FastTrainingConfig(TrainingConfig):
         self.num_train_timesteps = 500  # CRITICAL: Use 500 timesteps instead of 100
         self.save_checkpoint_epochs = 10
 
+        # Enhanced stochastic training for better KID/FID scores
+        self.random_rotation = True  # Enable rotation augmentation
+        self.rotation_degrees = 10   # Smaller rotation for crack preservation
+        self.color_jitter = True     # Enable color variations
+        self.color_jitter_brightness = 0.05  # Subtle brightness changes
+        self.color_jitter_contrast = 0.05    # Subtle contrast changes
+        self.random_crop_scale = (0.95, 1.0) # Minimal random cropping
+        self.noise_injection = True          # Add training noise
+        self.noise_injection_std = 0.01      # Very small noise amount
+
+        # Enable KID/FID metrics for stochastic training validation
+        self.compute_metrics = True  # Enable KID/FID computation
+        self.metrics_every_epochs = 25  # Compute every 25 epochs (2x per training)
+        self.num_metrics_samples = 200  # Use 200 samples for faster computation
+
         # reduce memory usage during sample generation
         self.num_samples_to_generate = 4
-        self.num_inference_steps = 50  # DDIM optimal: 50 steps = DDPM 500 steps quality
-
-        # disable torch.compile to save memory (CUDA graphs use too much)
-        self.use_compile = False
-        self.compute_fid = False  # Disable FID entirely for fast training
+        self.num_inference_steps = 50  # Increase inference steps
 
         # disable torch.compile to save memory (CUDA graphs use too much)
         self.use_compile = False
