@@ -1,5 +1,5 @@
 # Evaluation metrics for generative model quality assessment.
-# Includes FID (Fréchet Inception Distance) and IoU calculations.
+# Includes FID (Frechet Inception Distance) and IoU calculations.
 
 import torch
 import numpy as np
@@ -8,6 +8,8 @@ from pathlib import Path
 from pytorch_fid.fid_score import calculate_frechet_distance
 from pytorch_fid.inception import InceptionV3
 from torchvision import transforms
+from torchmetrics.image.fid import FrechetInceptionDistance
+from torchmetrics.image.kid import KernelInceptionDistance
 
 
 def compute_fid_score(
@@ -70,6 +72,66 @@ def compute_fid_score(
 
     return fid
 
+def compute_fid_kid_scores(real_images: torch.Tensor,
+    generated_images: torch.Tensor,
+    device: str = 'cuda'
+) -> Tuple[float, float]:
+
+    # Run FID/KID inception feature extraction on CPU to avoid competing with
+    # the diffusion model for GPU VRAM (model occupies ~22GB on A100 during training,
+    # leaving insufficient headroom for 2048 images at 299x299 on GPU).
+    # CPU is slower but eliminates OOM errors entirely.
+    metrics_device = 'cpu'
+
+    def preprocess_for_torchmetrics(images: torch.Tensor) -> torch.Tensor:
+        # denormalize from [-1, 1] to [0, 1]
+        images = (images.cpu() + 1.0) / 2.0
+        images = images.clamp(0.0, 1.0)
+        # batch interpolation — avoids slow per-image Python loop
+        images = torch.nn.functional.interpolate(
+            images, size=(299, 299), mode='bilinear', align_corners=False
+        )
+        return images
+
+    with torch.no_grad():
+        real_images_proc = preprocess_for_torchmetrics(real_images)
+        gen_images_proc = preprocess_for_torchmetrics(generated_images)
+
+        # clear GPU cache so model weights stay resident while CPU does inception work
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # feed in small batches to keep CPU RAM usage flat
+        batch = 128
+
+        # compute FID on CPU
+        print("Computing FID...")
+        fid = FrechetInceptionDistance(feature=2048, normalize=True).to(metrics_device)
+        for i in range(0, len(real_images_proc), batch):
+            fid.update(real_images_proc[i:i+batch], real=True)
+        for i in range(0, len(gen_images_proc), batch):
+            fid.update(gen_images_proc[i:i+batch], real=False)
+        fid_score = fid.compute().item()
+        fid.reset()
+        del fid
+
+        # compute KID on CPU
+        print("Computing KID...")
+        # subset_size=1000 is the standard for low-variance KID estimation
+        kid_subset_size = min(1000, len(real_images_proc))
+        kid = KernelInceptionDistance(normalize=True, subset_size=kid_subset_size).to(metrics_device)
+        for i in range(0, len(real_images_proc), batch):
+            kid.update(real_images_proc[i:i+batch], real=True)
+        for i in range(0, len(gen_images_proc), batch):
+            kid.update(gen_images_proc[i:i+batch], real=False)
+        kid_result = kid.compute()
+        kid_mean = kid_result[0].item()
+        kid_std = kid_result[1].item()
+        kid.reset()
+        del kid
+
+        print(f"KID: {kid_mean:.4f} +/- {kid_std:.4f} (subset_size={kid_subset_size})")
+        return fid_score, kid_mean
 
 def compute_iou(
     pred_mask: torch.Tensor,
@@ -141,6 +203,8 @@ class MetricsTracker:
             'train_loss': [],
             'val_loss': [],
             'fid_score': [],
+            'kid_score': [],
+            'mask_sensitivity_score': [],
             'learning_rate': [],
             'epoch': [],
         }
