@@ -1,6 +1,7 @@
-# DamageDiffusion Backend - Training pipeline
-Mask-conditioned diffusion (DDPM-style) for generating crack images from binary masks. Training is driven by train.py; colab_train.ipynb is the Google Colab workflow (Drive + local SSD + Hugging Face data
+# DamageDiffusion
+DamageDiffusion is a mask-conditioned diffusion project for infrastructure crack imagery. Binary crack mask and their corresponding RGB images are used by model to train on and generate realistic RGB crack photos that follow the geometry on multiple types of backgrounds. It targets dataset augmentation and more consistent, controllable visuals than ad-hoc severity labels alone.
 
+# Backend training pipeline
 ## What the model does
 - Input: RGB image + binary crack mask (4 channels: 3 + 1).
 - Output: Denoised RGB (noise prediction), using Hugging Face Diffusers (UNet2DModel + DDPMScheduler), wrapped in MaskConditionedDDPM (models/diffusion.py).
@@ -108,7 +109,7 @@ python inference.py \
 ## Generated images for each of the test images from inferencing are stored in backend/samples for each
 
 
-# DamageDiffusion Frontend
+# Frontend
 
 A Gradio-based frontend for generating synthetic concrete crack images from binary masks using the DamageDiffusion model.
 
