@@ -71,8 +71,18 @@ def detect_hardware(config):
         vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
         gpu_name = torch.cuda.get_device_name(0)
 
-        # VRAM-based batch sizing
-        config.train_batch_size = max(4, min(48, int(vram_gb * 1.5)))
+        # VRAM-based batch sizing with higher caps for large GPUs
+        # Conservative for small GPUs, aggressive for A100/H100
+        if vram_gb >= 40:
+            # A100/H100: Can handle much larger batches
+            config.train_batch_size = max(4, min(128, int(vram_gb * 1.2)))
+        elif vram_gb >= 24:
+            # RTX 3090/4090, V100 32GB
+            config.train_batch_size = max(4, min(64, int(vram_gb * 1.5)))
+        else:
+            # T4, RTX 2060, smaller GPUs
+            config.train_batch_size = max(4, min(32, int(vram_gb * 2.0)))
+
         config.eval_batch_size = config.train_batch_size * 2
         config.device = "cuda"
 
@@ -137,36 +147,53 @@ def main():
     if args.config == 'fast':
         config = FastTrainingConfig()
         print("\n" + "-"*50)
-        print("Fast training config approx 2-4 hrs")
+        print("STOCHASTIC Fast Training Config (4-6 hours)")
         print("-"*50)
-        print("20% data subset")
-        print("30 epochs")
-        print("Smaller model (12M params)")
-        print("100 timesteps")
+        print("50% data subset (vs 20% before)")
+        print("50 epochs (vs 30 before)")
+        print("Medium model (~25M params vs 12M before)")
+        print("500 timesteps (vs 100 before - CRITICAL FIX)")
+        print("ENHANCED STOCHASTIC AUGMENTATIONS:")
+        print("  - Random rotation +-10 degrees")
+        print("  - Color jittering")
+        print("  - Random cropping")
+        print("  - Noise injection")
+        print("  - Better KID/FID scores expected")
         print("-"*50)
-        print(f"DEBUG: After FastConfig creation:")
+        print(f"Verified config values:")
         print(f"num_epochs = {config.num_epochs}")
+        print(f"subset_ratio = {config.subset_ratio}")
         print(f"block_out_channels = {config.block_out_channels}")
         print(f"num_train_timesteps = {config.num_train_timesteps}")
         print("-"*50 + "\n")
     elif args.config == 'medium':
         config = MediumTrainingConfig()
         print("\n" + "-"*50)
-        print("Medium training config approx 4-6 hrs")
+        print("STOCHASTIC Medium Training Config (4-6 hours)")
         print("-"*50)
         print("50% data subset")
         print("50 epochs")
         print("Medium model (~45M params)")
         print("500 timesteps")
         print("VALIDATION MODE: Test if crack generation works")
+        print("KID/FID metrics: Every 25 epochs")
         print("-"*50 + "\n")
     else:
         config = TrainingConfig()
         print("\n" + "-"*50)
-        print("Full regular training config")
+        print("STOCHASTIC Full Training Config (8-16 hours)")
         print("-"*50)
-        print("Auto detect hardware")
-        print("Batch sizing based on vram")
+        print("100% data (full dataset)")
+        print("100 epochs")
+        print("Full model (~60M params)")
+        print("1000 timesteps")
+        print("ENHANCED STOCHASTIC AUGMENTATIONS:")
+        print("  - Random rotation +-15 degrees")
+        print("  - Color jittering")
+        print("  - Random cropping")
+        print("  - Noise injection")
+        print("KID/FID metrics: Every 10 epochs")
+        print("  - Best quality + diversity expected")
         print("-"*50 + "\n")
 
     # apply CLI overrides

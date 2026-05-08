@@ -17,12 +17,20 @@ sys.path.append(str(Path(__file__).parent))
 def load_model(checkpoint_path: str, device: str = 'cuda'):
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
-    # Recreate config
+    # Recreate the EXACT config used during training
     config = TrainingConfig()
     if 'config' in checkpoint:
+        # Apply all saved config values
         for key, value in checkpoint['config'].items():
             if hasattr(config, key):
                 setattr(config, key, value)
+        
+        print(f"Loaded training config:")
+        print(f"Model channels: {config.block_out_channels}")
+        print(f"Timesteps: {config.num_train_timesteps}")
+        print(f"Image size: {config.image_size}")
+    else:
+        print("WARNING: No config found in checkpoint, using defaults")
 
     # Create model
     model = MaskConditionedDDPM(config)
@@ -57,14 +65,22 @@ def generate_from_mask(
     mask: torch.Tensor,
     num_samples: int = 1,
     num_inference_steps: int = 50,
+    guidance_scale: float = 1.0,
     device: str = 'cuda',
 ):
-    # Repeat mask for multiple samples
     masks = mask.repeat(num_samples, 1, 1, 1).to(device)
 
-    # Generate
-    print(f"Generating {num_samples} samples with {num_inference_steps} steps...")
-    generated = model.generate(masks, num_inference_steps=num_inference_steps)
+    if guidance_scale > 1.0:
+        print(f"Generating {num_samples} samples with {num_inference_steps} steps "
+              f"and CFG guidance_scale={guidance_scale}...")
+        generated = model.generate_cfg(
+            masks,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+        )
+    else:
+        print(f"Generating {num_samples} samples with {num_inference_steps} steps...")
+        generated = model.generate(masks, num_inference_steps=num_inference_steps)
 
     return generated
 
@@ -83,7 +99,9 @@ def main():
     parser.add_argument('--num_samples', type=int, default=1,
                        help='Number of samples to generate per mask')
     parser.add_argument('--num_steps', type=int, default=50,
-                       help='Number of inference steps (50 for fast, 1000 for quality)')
+                       help='Number of inference steps (50 for fast, 500 for quality)')
+    parser.add_argument('--guidance_scale', type=float, default=1.0,
+                       help='CFG guidance scale (1.0=off, 3-7=recommended for crack visibility)')
     parser.add_argument('--device', type=str, default=None,
                        help='Device to use (cuda/mps/cpu)')
     parser.add_argument('--image_size', type=int, default=128,
@@ -121,6 +139,7 @@ def main():
             mask,
             num_samples=args.num_samples,
             num_inference_steps=args.num_steps,
+            guidance_scale=args.guidance_scale,
             device=device,
         )
 
@@ -147,6 +166,7 @@ def main():
                 mask,
                 num_samples=args.num_samples,
                 num_inference_steps=args.num_steps,
+                guidance_scale=args.guidance_scale,
                 device=device,
             )
 

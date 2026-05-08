@@ -8,11 +8,11 @@ from torch.cuda.amp import GradScaler
 from pathlib import Path
 from tqdm import tqdm
 import time
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 import json
 
-from .metrics import MetricsTracker, compute_fid_score
-from .visualization import visualize_samples, save_samples, plot_training_curves
+from .metrics import MetricsTracker, compute_fid_score, compute_fid_kid_scores
+from .visualization import visualize_samples, save_samples, plot_training_curves, plot_metrics
 from models.diffusion import EMAModel
 
 
@@ -69,6 +69,11 @@ class Trainer:
         self.scaler = GradScaler() if self.use_amp and config.mixed_precision == 'fp16' else None
         self.amp_dtype = torch.float16 if config.mixed_precision == 'fp16' else torch.bfloat16
 
+        # Pre-collect a fixed real image set for FID/KID evaluation.
+        # Using the same real images every evaluation run removes one source of
+        # variance from the FID/KID trend — only the generated distribution changes.
+        self._metrics_real_images, self._metrics_masks = self._collect_fixed_metrics_images()
+
         print(f"Trainer initialized on device: {device}")
         print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
         print(f"Mixed precision: {config.mixed_precision} (AMP: {self.use_amp})")
@@ -86,11 +91,26 @@ class Trainer:
             images = images.to(self.device, non_blocking=True, memory_format=torch.channels_last)
             masks = masks.to(self.device, non_blocking=True)
 
+            # Mask dropout: zero out masks for a fraction of batches so the model
+            # learns both conditioned and unconditioned generation. This enables
+            # CFG at inference to work correctly on the retrained checkpoint.
+            dropout_prob = getattr(self.config, 'mask_dropout_prob', 0.15)
+            if torch.rand(1).item() < dropout_prob:
+                training_masks = torch.zeros_like(masks)
+            else:
+                training_masks = masks
+
+            # Crack-weighted loss weight per pixel: crack pixels get higher weight.
+            # Fixes class imbalance where cracks are ~5% of pixels — without this
+            # the model ignores cracks and learns only concrete texture.
+            crack_weight_factor = getattr(self.config, 'crack_loss_weight', 10.0)
+            crack_weight = 1.0 + (crack_weight_factor - 1.0) * masks
+
             # Forward pass with mixed precision
             if self.use_amp:
                 with autocast(device_type='cuda', dtype=self.amp_dtype):
-                    noise_pred, noise, noisy_images = self.model(images, masks)
-                    loss = F.mse_loss(noise_pred, noise)
+                    noise_pred, noise, noisy_images = self.model(images, training_masks)
+                    loss = (F.mse_loss(noise_pred, noise, reduction='none') * crack_weight).mean()
 
                 # Backward pass with AMP
                 self.optimizer.zero_grad()
@@ -108,8 +128,8 @@ class Trainer:
                 self.scaler.update()
             else:
                 # Standard precision
-                noise_pred, noise, noisy_images = self.model(images, masks)
-                loss = F.mse_loss(noise_pred, noise)
+                noise_pred, noise, noisy_images = self.model(images, training_masks)
+                loss = (F.mse_loss(noise_pred, noise, reduction='none') * crack_weight).mean()
 
                 # Backward pass
                 self.optimizer.zero_grad()
@@ -185,19 +205,16 @@ class Trainer:
         masks = masks[:num_samples].to(self.device)
         images = images[:num_samples].to(self.device)
 
-        # Apply EMA if enabled
-        if self.ema is not None:
-            self.ema.apply_shadow(self.model)
+        # CRITICAL FIX: Use trained weights instead of EMA for sample generation
+        # EMA weights need ~10,000 steps to converge with decay=0.9999
+        # At early epochs (< 50), EMA is still mostly random initialization
+        # Using trained weights gives accurate training progress monitoring
 
-        # Generate images
+        # Generate images with trained weights (NOT EMA)
         generated = self.model.generate(
             masks,
             num_inference_steps=self.config.num_inference_steps
         )
-
-        # Restore original weights
-        if self.ema is not None:
-            self.ema.restore(self.model)
 
         return images, masks, generated
 
@@ -306,20 +323,73 @@ class Trainer:
 
                 # Log to TensorBoard
                 self.writer.add_figure('samples/generated', fig, epoch)
+                
+                # check for signs of crack earlier
+                if epoch >= 15 and epoch <= 25:
+                    print(f"\n{'-'*50}")
+                    print(f"Crack detection checkpoint - Epoch {epoch}")
+                    print(f"{'-'*50}")
+                    print(f"Check samples_epoch_{epoch}.png for crack patterns")
+                    print(f"If NO cracks visible by epoch 25, consider stopping training.")
+                    print(f"Model should show faint crack patterns by now.")
+                    print(f"{'-'*50}\n")
 
-            # Compute FID if enabled
-            if self.config.compute_fid and (epoch + 1) % self.config.fid_every_epochs == 0:
-                print("Computing FID score...")
+            # Compute FID and KID if enabled
+            compute_enabled = getattr(self.config, 'compute_metrics', False)
+            metrics_interval = getattr(self.config, 'metrics_every_epochs', 10)
+            if compute_enabled and (epoch + 1) % metrics_interval == 0:
+                print("Computing metrics...")
                 try:
-                    fid_score = self.compute_fid()
-                    self.metrics_tracker.update(fid_score=fid_score)
+                    fid_score, kid_score = self.compute_fid_kid()
+                    mask_sensitivity_score = self.compute_mask_sensitivity_score()
+                    self.metrics_tracker.update(
+                        fid_score=fid_score,
+                        kid_score=kid_score,
+                        mask_sensitivity_score=mask_sensitivity_score
+                    )
                     self.writer.add_scalar('metrics/fid', fid_score, epoch)
-                    print(f"FID Score: {fid_score:.2f}")
+                    self.writer.add_scalar('metrics/kid', kid_score, epoch)
+                    self.writer.add_scalar('metrics/mask_sensitivity', mask_sensitivity_score, epoch)
+                    
+                    print(f"FID Score: {fid_score:.3f}")
+                    print(f"KID Score: {kid_score:.6f}")  # KID values are typically much smaller
+                    print(f"Mask Sensitivity Score: {mask_sensitivity_score:.2f}%")
+                    
+                    # Interpret scores
+                    if kid_score < 0.01:
+                        print("  - KID: Excellent diversity (< 0.01)")
+                    elif kid_score < 0.05:
+                        print("  - KID: Good diversity (< 0.05)")
+                    else:
+                        print("  - KID: Poor diversity (>= 0.05)")
+                        
+                    if fid_score < 30:
+                        print("  - FID: Excellent quality (< 30)")
+                    elif fid_score < 50:
+                        print("  - FID: Good quality (< 50)")
+                    else:
+                        print("  - FID: Poor quality (>= 50)")
+
+                    if mask_sensitivity_score < 1.0:
+                        print("  - Mask Conditioning: Failed (< 1%)")
+                    elif mask_sensitivity_score < 10.0:
+                        print("  - Mask Conditioning: Weak (1-10%)")
+                    else:
+                        print("  - Mask Conditioning: Strong (>= 10%)")
                 except Exception as e:
-                    print(f"Failed to compute FID: {e}")
+                    print(f"Failed to compute FID or KID: {e}")
 
         # Save final checkpoint
         self.save_checkpoint('final_model.pt', is_best=False)
+        
+        # Run mask sensitivity diagnostic
+        print("\nRUNNING FINAL DIAGNOSTIC: Mask Sensitivity Test")
+        print("-"*50)
+        try:
+            self.run_mask_diagnostic()
+        except Exception as e:
+            print(f"Diagnostic failed: {e}")
+        print("-"*50)
 
         # Save metrics
         self.metrics_tracker.save()
@@ -330,6 +400,22 @@ class Trainer:
             self.metrics_tracker.metrics['val_loss'],
             save_path=f"{self.config.log_dir}/training_curves.png"
         )
+        
+        plot_metrics(
+            self.metrics_tracker.metrics['fid_score'],
+            'FID',
+            self.config.num_epochs,
+            self.config.metrics_every_epochs,
+            save_path=f"{self.config.log_dir}/fid_scores.png"
+        )
+        
+        plot_metrics(
+            self.metrics_tracker.metrics['kid_score'],
+            'KID',
+            self.config.num_epochs,
+            self.config.metrics_every_epochs,
+            save_path=f"{self.config.log_dir}/kid_scores.png"
+        )
 
         elapsed_time = time.time() - start_time
         print(f"\n{'='*60}")
@@ -339,6 +425,7 @@ class Trainer:
 
         self.writer.close()
 
+    # Possibly deprecated
     @torch.no_grad()
     def compute_fid(self) -> float:
         # compute FID score on validation set
@@ -352,18 +439,15 @@ class Trainer:
             real_images.append(images)
             masks_for_generation.append(masks)
 
-            if len(real_images) * images.shape[0] >= self.config.num_fid_samples:
+            if len(real_images) * images.shape[0] >= self.config.num_metrics_samples:
                 break
 
-        real_images = torch.cat(real_images, dim=0)[:self.config.num_fid_samples]
-        masks_for_generation = torch.cat(masks_for_generation, dim=0)[:self.config.num_fid_samples]
+        real_images = torch.cat(real_images, dim=0)[:self.config.num_metrics_samples]
+        masks_for_generation = torch.cat(masks_for_generation, dim=0)[:self.config.num_metrics_samples]
 
-        # Generate fake images
+        # Generate fake images using trained weights (not EMA)
         generated_images = []
         batch_size = self.config.eval_batch_size
-
-        if self.ema is not None:
-            self.ema.apply_shadow(self.model)
 
         for i in range(0, len(masks_for_generation), batch_size):
             batch_masks = masks_for_generation[i:i+batch_size].to(self.device)
@@ -373,12 +457,137 @@ class Trainer:
             )
             generated_images.append(batch_generated.cpu())
 
-        if self.ema is not None:
-            self.ema.restore(self.model)
-
         generated_images = torch.cat(generated_images, dim=0)
 
         # Compute FID
         fid = compute_fid_score(real_images, generated_images, device=self.device)
 
         return fid
+    
+    @torch.no_grad()
+    def run_mask_diagnostic(self):
+        """Test if model uses mask conditioning properly."""
+        self.model.eval()
+        
+        # Create test inputs - same image, different masks
+        batch_size = 2
+        noisy_image = torch.randn(batch_size, 3, self.config.image_size, self.config.image_size, device=self.device)
+        
+        # Two very different masks
+        mask1 = torch.zeros(1, 1, self.config.image_size, self.config.image_size, device=self.device)
+        mask1[0, 0, self.config.image_size//2, :] = 1.0  # Horizontal crack
+        
+        mask2 = torch.zeros(1, 1, self.config.image_size, self.config.image_size, device=self.device)
+        mask2[0, 0, :, self.config.image_size//2] = 1.0  # Vertical crack
+        
+        masks = torch.cat([mask1, mask2], dim=0)
+        timestep = torch.tensor([500, 500], device=self.device)
+        
+        relative_diff = self._compute_relative_mask_difference(noisy_image, masks, timestep)
+        
+        print(f"Mask sensitivity test:")
+        print(f"Relative difference: {relative_diff:.2f}%")
+        
+        if relative_diff < 1.0:
+            print("RESULT: MODEL IGNORES MASKS")
+            print("Action: Training failed - model needs debugging")
+        elif relative_diff < 10.0:
+            print("RESULT: WEAK mask conditioning")
+            print("Action: May need longer training or architecture changes")
+        else:
+            print("RESULT: GOOD mask conditioning")
+            print("Action: Model successfully learned mask-conditioned generation")
+
+    @torch.no_grad()
+    def compute_mask_sensitivity_score(self) -> float:
+        """Fast proxy metric: how much outputs change when only masks change."""
+        self.model.eval()
+
+        batch_size = 2
+        noisy_image = torch.randn(batch_size, 3, self.config.image_size, self.config.image_size, device=self.device)
+
+        mask1 = torch.zeros(1, 1, self.config.image_size, self.config.image_size, device=self.device)
+        mask1[0, 0, self.config.image_size // 2, :] = 1.0
+        mask2 = torch.zeros(1, 1, self.config.image_size, self.config.image_size, device=self.device)
+        mask2[0, 0, :, self.config.image_size // 2] = 1.0
+        masks = torch.cat([mask1, mask2], dim=0)
+        timestep = torch.tensor([500, 500], device=self.device)
+
+        return self._compute_relative_mask_difference(noisy_image, masks, timestep)
+
+    @torch.no_grad()
+    def _compute_relative_mask_difference(
+        self,
+        noisy_image: torch.Tensor,
+        masks: torch.Tensor,
+        timestep: torch.Tensor
+    ) -> float:
+        model_input = torch.cat([noisy_image, masks], dim=1)
+        output = self.model.model(model_input, timestep).sample
+
+        diff = (output[0] - output[1]).abs().mean()
+        output_scale = output.abs().mean().clamp_min(1e-8)
+        relative_diff = (diff / output_scale * 100).item()
+        return relative_diff
+
+    @torch.no_grad()
+    def _collect_fixed_metrics_images(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Collect the full val set once at init as a fixed real image pool.
+        # Using the same real images every evaluation removes real-distribution
+        # variance from FID/KID so only the generated side changes across epochs.
+        #
+        # We use ALL val images (961) rather than truncating to num_metrics_samples
+        # or tiling. Tiling would introduce duplicate samples that make the real
+        # covariance matrix near-singular and corrupt FID. The generated side uses
+        # num_metrics_samples (2048) masks — asymmetric counts are fine for FID/KID.
+        #
+        # val_loader is safe to exhaust here: validate() and generate_samples()
+        # both create fresh iterators via `for` loop and `next(iter(...))`,
+        # so this init read does not affect training or validation data ordering.
+        real_images = []
+        masks = []
+
+        for imgs, msks in self.val_loader:
+            real_images.append(imgs)
+            masks.append(msks)
+
+        real_images = torch.cat(real_images, dim=0)
+        masks = torch.cat(masks, dim=0)
+        print(f"Fixed metrics image set collected: {len(real_images)} real val images")
+        return real_images, masks
+
+    # Computing FID and KID metrics together to avoid regenerating for each
+    @torch.no_grad()
+    def compute_fid_kid(self) -> Tuple[float, float]:
+        self.model.eval()
+
+        # Use the fixed real image set collected at init — same every evaluation run
+        real_images = self._metrics_real_images
+        masks_for_generation = self._metrics_masks
+
+        print(f"Generating {len(masks_for_generation)} images against {len(real_images)} fixed real images...")
+
+        # Generate fake images using raw trained weights (not EMA)
+        generated_images = []
+        batch_size = self.config.eval_batch_size
+
+        progress_bar = tqdm(range(0, len(masks_for_generation), batch_size), desc="Generating images")
+        for batch_idx, i in enumerate(progress_bar):
+            batch_masks = masks_for_generation[i:i+batch_size].to(self.device)
+            batch_generated = self.model.generate(
+                batch_masks,
+                num_inference_steps=self.config.num_inference_steps
+            )
+            generated_images.append(batch_generated.cpu())
+
+        generated_images = torch.cat(generated_images, dim=0)
+
+        # Free GPU cache before metric computation — inception runs on CPU to avoid
+        # competing with model weights (~22GB) for the remaining VRAM
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # Compute scores — device arg kept for API compatibility but metrics run on CPU
+        fid, kid = compute_fid_kid_scores(real_images, generated_images, self.device)
+
+        return fid, kid
