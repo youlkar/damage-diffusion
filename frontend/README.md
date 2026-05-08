@@ -38,20 +38,6 @@ The main workflow is:
 - Matplotlib
 - Google Colab / Google Drive integration
 
-## Project Structure
-
-```text
-damage-diffusion/
-├── app.ipynb
-├── backend/
-│   ├── inference.py
-│   ├── utils/
-│   │   ├── metrics.py
-│   │   └── visualization.py
-│   └── ...
-└── README.md
-```
-
 ## Requirements
 
 Install the required packages before running the notebook:
@@ -163,21 +149,6 @@ These are imported from the backend inference pipeline and used to run mask-cond
 - If `cuda` is selected but unavailable, the app falls back to CPU.
 - The notebook includes some additional development utilities, but the main showcased frontend workflow is generation and metrics visualization.
 
-## Limitations
-
-- The frontend depends on the backend repository structure being available and importable.
-- Metrics visualization requires a saved metrics file.
-- Image quality depends on the checkpoint used for inference.
-- The current workflow is optimized for Colab and may require path changes for local execution.
-
-## Future Improvements
-
-Possible next steps for the frontend include:
-- packaging the app outside Colab,
-- easier checkpoint and artifact management,
-- support for direct file uploads for metrics,
-- batch export of generated images,
-- improved high-resolution output support.
 
 ## Acknowledgments
 
