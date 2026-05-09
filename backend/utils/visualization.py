@@ -8,7 +8,7 @@ from typing import Optional
 import torchvision.utils as vutils
 
 
-def denormalize(tensor: torch.Tensor) -> torch.Tensor:
+def denormalize(tensor: torch.Tensor):
     return (tensor + 1.0) / 2.0
 
 
@@ -18,7 +18,7 @@ def visualize_samples(
     generated: Optional[torch.Tensor] = None,
     num_samples: int = 4,
     save_path: Optional[str] = None,
-) -> plt.Figure:
+):
     # visualize image-mask pairs and optionally generated images
     num_samples = min(num_samples, images.shape[0])
 
@@ -92,7 +92,7 @@ def plot_training_curves(
     train_losses: list,
     val_losses: list,
     save_path: Optional[str] = None,
-) -> plt.Figure:
+):
     # plot training and validation loss curves
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -119,7 +119,7 @@ def plot_metrics(
     num_epochs: int,
     num_between_epochs: int,
     save_path: Optional[str] = None,
-) -> plt.Figure:
+):
     # plot training and validation loss curves
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -142,7 +142,7 @@ def create_mask_overlay(
     images: torch.Tensor,
     masks: torch.Tensor,
     alpha: float = 0.5,
-) -> torch.Tensor:
+):
     # create overlay of masks on images for visualization
     images_vis = denormalize(images)
 

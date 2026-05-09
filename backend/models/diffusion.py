@@ -50,7 +50,7 @@ class MaskConditionedDDPM(nn.Module):
         masks: torch.Tensor,
         noise: Optional[torch.Tensor] = None,
         timesteps: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ):
         batch_size = images.shape[0]
 
         # sample random noise if not available
@@ -83,23 +83,12 @@ class MaskConditionedDDPM(nn.Module):
         masks: torch.Tensor,
         num_inference_steps: int = 50,
         generator: Optional[torch.Generator] = None,
-    ) -> torch.Tensor:
-        """
-        Generate images from masks using DDIM sampling.
-
-        DDIM (Denoising Diffusion Implicit Models) provides fast, deterministic sampling:
-        - 50 steps achieves quality equivalent to DDPM's 500 steps
-        - 10x faster inference (critical for production/frontend use)
-        - Non-Markovian process allows safe timestep skipping
-
-        Args:
-            masks: Binary masks (B, 1, H, W)
-            num_inference_steps: Number of denoising steps (50 recommended)
-            generator: Random generator for reproducibility
-
-        Returns:
-            Generated images (B, 3, H, W) in range [-1, 1]
-        """
+    ):
+        # Generate images from masks using DDIM sampling
+        # DDIM (Denoising Diffusion Implicit Models) provides fast, deterministic sampling:
+        # - 50 steps achieves quality equivalent to DDPM's 500 steps
+        # - 10x faster inference (critical for production/frontend use)
+        # - Non-Markovian process allows safe timestep skipping
         batch_size = masks.shape[0]
 
         # Start from random noise
@@ -149,7 +138,7 @@ class MaskConditionedDDPM(nn.Module):
         num_inference_steps: int = 50,
         guidance_scale: float = 3.0,
         generator: Optional[torch.Generator] = None,
-    ) -> torch.Tensor:
+    ):
         # Classifier-free guidance (CFG) for mask-conditioned image generation.
 
         batch_size = masks.shape[0]

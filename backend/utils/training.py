@@ -78,7 +78,7 @@ class Trainer:
         print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
         print(f"Mixed precision: {config.mixed_precision} (AMP: {self.use_amp})")
 
-    def train_epoch(self) -> float:
+    def train_epoch(self):
         # train for one epoch
         self.model.train()
         total_loss = 0.0
@@ -166,7 +166,7 @@ class Trainer:
         return avg_loss
 
     @torch.no_grad()
-    def validate(self) -> float:
+    def validate(self):
         # validate the model
         self.model.eval()
         total_loss = 0.0
@@ -192,7 +192,7 @@ class Trainer:
         return avg_loss
 
     @torch.no_grad()
-    def generate_samples(self, num_samples: int = 8) -> torch.Tensor:
+    def generate_samples(self, num_samples: int = 8):
         # generate samples for visualization
         self.model.eval()
 
@@ -427,7 +427,7 @@ class Trainer:
 
     # Possibly deprecated
     @torch.no_grad()
-    def compute_fid(self) -> float:
+    def compute_fid(self):
         # compute FID score on validation set
         self.model.eval()
 
@@ -499,7 +499,7 @@ class Trainer:
             print("Action: Model successfully learned mask-conditioned generation")
 
     @torch.no_grad()
-    def compute_mask_sensitivity_score(self) -> float:
+    def compute_mask_sensitivity_score(self):
         """Fast proxy metric: how much outputs change when only masks change."""
         self.model.eval()
 
@@ -521,7 +521,7 @@ class Trainer:
         noisy_image: torch.Tensor,
         masks: torch.Tensor,
         timestep: torch.Tensor
-    ) -> float:
+    ):
         model_input = torch.cat([noisy_image, masks], dim=1)
         output = self.model.model(model_input, timestep).sample
 
@@ -531,7 +531,7 @@ class Trainer:
         return relative_diff
 
     @torch.no_grad()
-    def _collect_fixed_metrics_images(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _collect_fixed_metrics_images(self):
         # Collect the full val set once at init as a fixed real image pool.
         # Using the same real images every evaluation removes real-distribution
         # variance from FID/KID so only the generated side changes across epochs.
@@ -558,7 +558,7 @@ class Trainer:
 
     # Computing FID and KID metrics together to avoid regenerating for each
     @torch.no_grad()
-    def compute_fid_kid(self) -> Tuple[float, float]:
+    def compute_fid_kid(self):
         self.model.eval()
 
         # Use the fixed real image set collected at init — same every evaluation run

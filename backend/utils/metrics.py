@@ -16,7 +16,7 @@ def compute_fid_score(
     real_images: torch.Tensor,
     generated_images: torch.Tensor,
     device: str = 'cuda',
-) -> float:
+):
     # initialize inception model
     block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
     inception_model = InceptionV3([block_idx]).to(device)
@@ -75,7 +75,7 @@ def compute_fid_score(
 def compute_fid_kid_scores(real_images: torch.Tensor,
     generated_images: torch.Tensor,
     device: str = 'cuda'
-) -> Tuple[float, float]:
+):
 
     # Run FID/KID inception feature extraction on CPU to avoid competing with
     # the diffusion model for GPU VRAM (model occupies ~22GB on A100 during training,
@@ -83,7 +83,7 @@ def compute_fid_kid_scores(real_images: torch.Tensor,
     # CPU is slower but eliminates OOM errors entirely.
     metrics_device = 'cpu'
 
-    def preprocess_for_torchmetrics(images: torch.Tensor) -> torch.Tensor:
+    def preprocess_for_torchmetrics(images: torch.Tensor):
         # denormalize from [-1, 1] to [0, 1]
         images = (images.cpu() + 1.0) / 2.0
         images = images.clamp(0.0, 1.0)
@@ -137,7 +137,7 @@ def compute_iou(
     pred_mask: torch.Tensor,
     true_mask: torch.Tensor,
     threshold: float = 0.5,
-) -> float:
+):
     """
     Compute Intersection over Union (IoU) for binary masks.
 
@@ -167,7 +167,7 @@ def compute_pixel_accuracy(
     pred_mask: torch.Tensor,
     true_mask: torch.Tensor,
     threshold: float = 0.5,
-) -> float:
+):
     pred_binary = (pred_mask > threshold).float()
     true_binary = (true_mask > threshold).float()
 
@@ -183,7 +183,7 @@ def evaluate_conditioning_alignment(
     val_loader,
     num_samples: int = 100,
     device: str = 'cuda',
-) -> Tuple[float, float]:
+):
     # TODO: Implement with pre-trained segmentation model
     # For now, return placeholder values
     print("Warning: Conditioning alignment evaluation requires a pre-trained segmentation model.")
